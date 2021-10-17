@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -9,28 +11,35 @@ import (
 	"github.com/kaspanet/kaspad/app/appmessage"
 	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 	"os"
+	"reflect"
 )
 
 const ProgName = "katnip"
 const HashLength = 32
-const KeyLength = 16
+
+//const KeyLength = 16
 
 type Hash [HashLength]byte
 type Bytes []byte
-type Key [KeyLength]byte
-type HashRest [HashLength - KeyLength]byte
+
+/*type Key [KeyLength]byte
+type HashRest [HashLength - KeyLength]byte*/
+
+const (
+	PrefixMaxBlueWork byte = iota
+)
 
 type Block struct {
 	Hash               Hash
 	IsHeaderOnly       bool
 	BlueScore          uint64
 	Version            uint32
-	SelectedParent     uint
+	SelectedParent     uint64
 	Parents            [][]Hash
 	MerkleRoot         Hash
 	AcceptedMerkleRoot Hash
 	UtxoCommitment     Hash
-	Timestamp          int64
+	Timestamp          uint64
 	Bits               uint32
 	Nonce              uint64
 	DaaScore           uint64
@@ -91,6 +100,8 @@ func main() {
 		return err
 	}))
 
+	MaxBlueWorkKey := []byte{PrefixMaxBlueWork}
+
 	var bluestHash []byte
 	err = dbEnv.View(func(txn *lmdb.Txn) (err error) {
 		bluestHash, err = txn.Get(db, MaxBlueWorkKey)
@@ -132,6 +143,7 @@ func main() {
 }
 
 func insert(rpcBlocks []*appmessage.RPCBlock) {
+	log(LogInf, "Inserting blocks: %d", len(rpcBlocks))
 	for _, rpcBlock := range rpcBlocks {
 		rpcVData := rpcBlock.VerboseData
 		rpcHeader := rpcBlock.Header
@@ -144,7 +156,7 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 			MerkleRoot:         S2h(rpcHeader.HashMerkleRoot),
 			AcceptedMerkleRoot: S2h(rpcHeader.AcceptedIDMerkleRoot),
 			UtxoCommitment:     S2h(rpcHeader.UTXOCommitment),
-			Timestamp:          rpcHeader.Timestamp,
+			Timestamp:          uint64(rpcHeader.Timestamp),
 			Bits:               rpcHeader.Bits,
 			Nonce:              rpcHeader.Nonce,
 			DaaScore:           rpcHeader.DAAScore,
@@ -154,7 +166,7 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 
 		// Parents
 		block.Parents = make([][]Hash, len(rpcHeader.Parents))
-		selectedParent := uint(0)
+		selectedParent := uint64(0)
 		for i, rpcParentLevel := range rpcHeader.Parents {
 			rpcParent := rpcParentLevel.ParentHashes
 			parents := make([]Hash, len(rpcParent))
@@ -168,7 +180,19 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 			block.Parents[i] = parents
 		}
 
+		binBuff := bytes.Buffer{}
+		encoder := gob.NewEncoder(&binBuff)
+		PanicIfErr(encoder.Encode(block))
+		fmt.Printf("Gob Bytes: %x\n", binBuff.Bytes())
+		fmt.Printf("Block before: %v\n", block)
+		decoder := gob.NewDecoder(&binBuff)
+		var block2 Block
+		PanicIfErr(decoder.Decode(&block2))
+		fmt.Printf("Block after: %v\n", block2)
 
+		binBuff.Reset()
+		SerializeValue(&binBuff, block)
+		fmt.Printf("My Bytes: %x\n", binBuff.Bytes())
 
 		// Transactions
 		for _, rpcTransaction := range rpcBlock.Transactions {
@@ -176,7 +200,6 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 			rpcInputs := rpcTransaction.Inputs
 			rpcOutputs := rpcTransaction.Outputs
 			transaction := Transaction{
-				Block:    blockHash,
 				Hash:     S2h(rpcTxVData.Hash),
 				Id:       S2h(rpcTxVData.TransactionID),
 				Version:  rpcTransaction.Version,
@@ -210,18 +233,104 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 			}
 		}
 	}
-	=    buf := new(bytes.Buffer)
-	serialize(buf, rpcBlocks[0].Header, 10)
-	serialize(buf, rpcBlocks[0].VerboseData, -1)
-	fmt.Printf("%x", buf.Bytes())
 }
+
+func SerializeValue(buffer *bytes.Buffer, value interface{}) {
+	metaValue := reflect.ValueOf(value)
+	switch metaValue.Kind() {
+	case reflect.Struct:
+		for i := 0; i < metaValue.NumField(); i++ {
+			SerializeValue(buffer, metaValue.Field(i).Interface())
+		}
+	case reflect.Slice:
+		SerializeUint64(buffer, uint64(metaValue.Len()))
+		SerializeArray(buffer, metaValue)
+	case reflect.String:
+		SerializeUint64(buffer, uint64(metaValue.Len()))
+		buffer.WriteString(value.(string))
+	case reflect.Array:
+		SerializeArray(buffer, metaValue)
+	case reflect.Uint16:
+		SerializeUint64(buffer, uint64(value.(uint16)))
+	case reflect.Uint32:
+		SerializeUint64(buffer, uint64(value.(uint32)))
+	case reflect.Uint64:
+		SerializeUint64(buffer, value.(uint64))
+	case reflect.Uint8:
+		buffer.WriteByte(value.(byte))
+	case reflect.Bool:
+		boolValue := byte(0)
+		if value.(bool) {
+			boolValue = 1
+		}
+		buffer.WriteByte(boolValue)
+	}
+}
+
+func SerializeArray(buffer *bytes.Buffer, metaValue reflect.Value) {
+	for i := 0; i < metaValue.Len(); i++ {
+		SerializeValue(buffer, metaValue.Index(i).Interface())
+	}
+}
+
+func SerializeUint64(buffer *bytes.Buffer, value uint64) {
+	valueBytes := make([]byte, 8)
+	n := binary.PutUvarint(valueBytes, value)
+	buffer.Write(valueBytes[:n])
+}
+
+func DeserializeValue(buffer *bytes.Buffer, value interface{}) {
+	metaValue := reflect.ValueOf(value)
+	switch metaValue.Kind() {
+	case reflect.Struct:
+		for i := 0; i < metaValue.NumField(); i++ {
+			DeserializeValue(buffer, metaValue.Field(i).Interface())
+		}
+	case reflect.Slice:
+		SerializeUint64(buffer, uint64(metaValue.Len()))
+		SerializeArray(buffer, metaValue)
+	case reflect.String:
+		SerializeUint64(buffer, uint64(metaValue.Len()))
+		buffer.WriteString(value.(string))
+	case reflect.Array:
+		SerializeArray(buffer, metaValue)
+	case reflect.Uint16:
+		SerializeUint64(buffer, uint64(value.(uint16)))
+	case reflect.Uint32:
+		SerializeUint64(buffer, uint64(value.(uint32)))
+	case reflect.Uint64:
+		SerializeUint64(buffer, value.(uint64))
+	case reflect.Uint8:
+		buffer.WriteByte(value.(byte))
+	case reflect.Bool:
+		boolValue := byte(0)
+		if value.(bool) {
+			boolValue = 1
+		}
+		buffer.WriteByte(boolValue)
+	}
+}
+
+func DeserializeArray(buffer *bytes.Buffer, metaValue reflect.Value) {
+	for i := 0; i < metaValue.Len(); i++ {
+		SerializeValue(buffer, metaValue.Index(i).Interface())
+	}
+}
+
+func DeserializeUint64(buffer *bytes.Buffer, value uint64) {
+	valueBytes := make([]byte, 8)
+	n := binary.PutUvarint(valueBytes, value)
+	buffer.Write(valueBytes[:n])
+}
+
+
 
 func S2h(s string) (h Hash) {
 	copy(h[:], S2b(s))
 	return h
 }
 
-func H2k(h Hash) (k Key) {
+/*func H2k(h Hash) (k Key) {
 	copy(k[:], h[:KeyLength-1])
 	return k
 }
@@ -229,7 +338,7 @@ func H2k(h Hash) (k Key) {
 func H2r(h Hash) (r HashRest) {
 	copy(r[:], h[KeyLength:])
 	return r
-}
+}*/
 
 func S2b(s string) Bytes {
 	if len(s)%2 == 1 {
@@ -258,6 +367,6 @@ var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG"}
 
 func log(level byte, format string, args ...interface{}) {
 	if level <= byte(*logLevel) {
-		fmt.Fprintf(os.Stderr, LevelStr[level]+" "+format+"\n", args...)
+		_, _ = fmt.Fprintf(os.Stderr, LevelStr[level]+" "+format+"\n", args...)
 	}
 }
