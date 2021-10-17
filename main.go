@@ -188,11 +188,18 @@ func insert(rpcBlocks []*appmessage.RPCBlock) {
 		decoder := gob.NewDecoder(&binBuff)
 		var block2 Block
 		PanicIfErr(decoder.Decode(&block2))
-		fmt.Printf("Block after: %v\n", block2)
+		fmt.Printf("Block2 after: %v\n", block2)
 
 		binBuff.Reset()
 		SerializeValue(&binBuff, block)
-		fmt.Printf("My Bytes: %x\n", binBuff.Bytes())
+		buffbytes := binBuff.Bytes()
+		fmt.Printf("My Bytes: %x\n", buffbytes)
+		block3 := &Block{}
+		fmt.Printf("Block3 empty: %v\n", block3)
+		metaValue := reflect.ValueOf(block3).Elem()
+		DeserializeValue(&binBuff, metaValue)
+		fmt.Printf("Block3 after: %v\n", block3)
+		break
 
 		// Transactions
 		for _, rpcTransaction := range rpcBlock.Transactions {
@@ -279,51 +286,52 @@ func SerializeUint64(buffer *bytes.Buffer, value uint64) {
 	buffer.Write(valueBytes[:n])
 }
 
-func DeserializeValue(buffer *bytes.Buffer, value interface{}) {
-	metaValue := reflect.ValueOf(value)
+func DeserializeValue(buffer *bytes.Buffer, metaValue reflect.Value) {
 	switch metaValue.Kind() {
 	case reflect.Struct:
 		for i := 0; i < metaValue.NumField(); i++ {
-			DeserializeValue(buffer, metaValue.Field(i).Interface())
+			DeserializeValue(buffer, metaValue.Field(i))
 		}
 	case reflect.Slice:
-		SerializeUint64(buffer, uint64(metaValue.Len()))
-		SerializeArray(buffer, metaValue)
+		len := uint64(0)
+		DeserializeUint64(buffer, reflect.ValueOf(&len).Elem())
+		ilen := int(len)
+		metaSlice := reflect.MakeSlice(metaValue.Type(), ilen, ilen)
+		DeserializeArray(buffer, metaSlice)
+		metaValue.Set(metaSlice)
 	case reflect.String:
-		SerializeUint64(buffer, uint64(metaValue.Len()))
-		buffer.WriteString(value.(string))
+		len := uint64(0)
+		DeserializeUint64(buffer,  reflect.ValueOf(&len).Elem())
+		ilen := int(len)
+		buf := make([]byte, ilen)
+		buffer.Read(buf)
+		metaValue.SetString(string(buf))
 	case reflect.Array:
-		SerializeArray(buffer, metaValue)
-	case reflect.Uint16:
-		SerializeUint64(buffer, uint64(value.(uint16)))
-	case reflect.Uint32:
-		SerializeUint64(buffer, uint64(value.(uint32)))
-	case reflect.Uint64:
-		SerializeUint64(buffer, value.(uint64))
+		DeserializeArray(buffer, metaValue)
+	case reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		DeserializeUint64(buffer, metaValue)
 	case reflect.Uint8:
-		buffer.WriteByte(value.(byte))
+		val, err := buffer.ReadByte()
+		PanicIfErr(err)
+		metaValue.SetUint(uint64(val))
 	case reflect.Bool:
-		boolValue := byte(0)
-		if value.(bool) {
-			boolValue = 1
-		}
-		buffer.WriteByte(boolValue)
+		val, err := buffer.ReadByte()
+		PanicIfErr(err)
+		metaValue.SetBool(val == 1)
 	}
 }
 
 func DeserializeArray(buffer *bytes.Buffer, metaValue reflect.Value) {
 	for i := 0; i < metaValue.Len(); i++ {
-		SerializeValue(buffer, metaValue.Index(i).Interface())
+		DeserializeValue(buffer, metaValue.Index(i))
 	}
 }
 
-func DeserializeUint64(buffer *bytes.Buffer, value uint64) {
-	valueBytes := make([]byte, 8)
-	n := binary.PutUvarint(valueBytes, value)
-	buffer.Write(valueBytes[:n])
+func DeserializeUint64(buffer *bytes.Buffer, metaValue reflect.Value) {
+	value, err := binary.ReadUvarint(buffer)
+	PanicIfErr(err)
+	metaValue.SetUint(value)
 }
-
-
 
 func S2h(s string) (h Hash) {
 	copy(h[:], S2b(s))
