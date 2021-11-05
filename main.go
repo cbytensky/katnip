@@ -12,6 +12,7 @@ import (
 	"math/bits"
 	"os"
 	"reflect"
+	"time"
 )
 
 const ProgName = "katnip"
@@ -22,12 +23,14 @@ const KeyLength = 16
 type Hash [HashLength]byte
 type Key [KeyLength]byte
 type Bytes []byte
+type RpcBlocks []*appmessage.RPCBlock
+type WriteChanType chan WriteChanElem
 
 /*
 type HashRest [HashLength - KeyLength]byte*/
 
 const (
-	PrefixMaxBlueWork byte = iota
+	PrefixBluestBlock byte = iota
 	PrefixBlock
 	PrefixBlockChild
 	PrefixTransaction
@@ -82,8 +85,13 @@ type Output struct {
 }
 
 type AddressKey struct {
-	Address string
+	Address  string
 	BlockKey Key
+}
+
+type WriteChanElem struct {
+	RpcBlocks  RpcBlocks
+	BluestHash Hash
 }
 
 var logLevel *int
@@ -92,9 +100,13 @@ var (
 	db    lmdb.DBI
 )
 
+var WriteChan WriteChanType
+var MaxBlueWork Bytes
+var BluestHash Hash
+
 func main() {
 	rpcServer := flag.String("rpcserver", "0.0.0.0:16110", "Kaspa RPC server address")
-	logLevel = flag.Int("loglevel", LogWrn, "Log level (off = 0, error = 1, wargning = 2, info = 3, debug = 4)")
+	logLevel = flag.Int("loglevel", LogWrn, "Log level (off = 0, error = 1, wargning = 2, info = 3, debug = 4, trace = 5), default: 2")
 	flag.Parse()
 	if len(flag.Args()) > 0 {
 		flag.Usage()
@@ -104,7 +116,7 @@ func main() {
 	var err error
 	dbEnv, err = lmdb.NewEnv()
 	PanicIfErr(err)
-	PanicIfErr(dbEnv.SetMapSize(1 << 30))
+	PanicIfErr(dbEnv.SetMapSize(1 << 20))
 	cacheDir, err := os.UserCacheDir()
 	PanicIfErr(err)
 	dbDir := cacheDir + "/" + ProgName
@@ -116,34 +128,38 @@ func main() {
 		return err
 	}))
 
-	MaxBlueWorkKey := []byte{PrefixMaxBlueWork}
-
-	var bluestHash []byte
-	err = dbEnv.View(func(txn *lmdb.Txn) (err error) {
-		bluestHash, err = txn.Get(db, MaxBlueWorkKey)
-		return err
-	})
 	lowHashStr := ""
-	if !lmdb.IsNotFound(err) {
-		PanicIfErr(err)
-		lowHashStr = hex.EncodeToString(bluestHash)
-		log(LogInf, "Bluest block hash: "+lowHashStr)
+	maxBlueWork := ""
+	if dbGet(PrefixBluestBlock, nil, &BluestHash) {
+		lowHashStr = hex.EncodeToString(BluestHash[:])
+		log(LogInf, "Bluest block hash: %s", lowHashStr)
 	}
 
-	log(LogInf, "Connecting to Kaspad: "+*rpcServer)
-	rpcClient, err := rpcclient.NewRPCClient(*rpcServer)
+	var rpcClient *rpcclient.RPCClient
+	for {
+		log(LogInf, "Connecting to Kaspad: %s", *rpcServer)
+		rpcClient, err = rpcclient.NewRPCClient(*rpcServer)
+		if err == nil {
+			break
+		} else {
+			log(LogErr, "%v", err)
+		}
+	}
+
 	PanicIfErr(err)
 	log(LogInf, "IBD stared")
+
+	WriteChan = make(WriteChanType, 10)
+	go insert()
+
 	var response *appmessage.GetBlocksResponseMessage
 	ibdCount := 0
 	for {
-		for {
-			log(LogDbg, "getBlocks: "+lowHashStr)
-			response, err = rpcClient.GetBlocks(lowHashStr, true, true)
-			if err == nil {
-				break
-			}
+		log(LogInf, "getBlocks: %s", lowHashStr)
+		response, err = rpcClient.GetBlocks(lowHashStr, true, true)
+		if err != nil {
 			log(LogErr, "getBlocks: %s", err)
+			continue
 		}
 		rpcBlocks := response.Blocks
 		count := len(rpcBlocks)
@@ -151,139 +167,183 @@ func main() {
 			break
 		}
 		ibdCount += count
-		lowHashStr = rpcBlocks[count-1].VerboseData.Hash
-		insert(rpcBlocks)
+
+		for _, rpcBlock := range rpcBlocks {
+			blueWork := rpcBlock.Header.BlueWork
+			if len(blueWork) > len(maxBlueWork) || len(blueWork) == len(maxBlueWork) && blueWork > maxBlueWork {
+				maxBlueWork = blueWork
+				lowHashStr = rpcBlock.VerboseData.Hash
+			}
+		}
+		WriteChan <- WriteChanElem{rpcBlocks, S2h(lowHashStr)}
 	}
 	log(LogInf, "IBD finished, blocks: %d", ibdCount)
+	for {
+		blockAdded := <-rpcClient.OnBlockAdded:
+			blockResponse, err := client.GetBlock(blockAdded.Block.VerboseData.Hash, true)
+			PanicIfErr(err)
+			insert([]*appmessage.RPCBlock{blockResponse.Block})
+	}
 }
 
-func insert(rpcBlocks []*appmessage.RPCBlock) {
-	log(LogInf, "Inserting blocks: %d", len(rpcBlocks))
+func insert() {
 	for {
-		err := dbEnv.Update(func(txn *lmdb.Txn) (err error) {
-			for _, rpcBlock := range rpcBlocks {
-				rpcVData := rpcBlock.VerboseData
-				rpcHeader := rpcBlock.Header
-				blockHash := S2h(rpcVData.Hash)
-				block := Block{
-					Hash:               blockHash,
-					IsHeaderOnly:       rpcVData.IsHeaderOnly,
-					BlueScore:          rpcVData.BlueScore,
-					Version:            rpcHeader.Version,
-					MerkleRoot:         S2h(rpcHeader.HashMerkleRoot),
-					AcceptedMerkleRoot: S2h(rpcHeader.AcceptedIDMerkleRoot),
-					UtxoCommitment:     S2h(rpcHeader.UTXOCommitment),
-					Timestamp:          uint64(rpcHeader.Timestamp),
-					Bits:               rpcHeader.Bits,
-					Nonce:              rpcHeader.Nonce,
-					DaaScore:           rpcHeader.DAAScore,
-					BlueWork:           S2b(rpcHeader.BlueWork),
-					PruningPoint:       S2h(rpcHeader.PruningPoint),
-				}
+		writeElem := <-WriteChan
+		rpcBlocks := writeElem.RpcBlocks
+		for {
+			err := dbEnv.Update(func(txn *lmdb.Txn) (err error) {
+				for _, rpcBlock := range rpcBlocks {
+					rpcVData := rpcBlock.VerboseData
+					rpcHeader := rpcBlock.Header
+					blockHash := S2h(rpcVData.Hash)
+					blueWork := S2b(rpcHeader.BlueWork)
 
-				keyBlock := H2k(block.Hash)
-
-				// Parents
-				block.Parents = make([][]Hash, len(rpcHeader.Parents))
-				selectedParent := uint64(0)
-				for i, rpcParentLevel := range rpcHeader.Parents {
-					rpcParent := rpcParentLevel.ParentHashes
-					parents := make([]Hash, len(rpcParent))
-					for j, rpcParent := range rpcParent {
-						parent := S2h(rpcParent)
-						parents[j] = parent
-						if rpcParent == rpcVData.SelectedParentHash {
-							block.SelectedParent = selectedParent
-						}
-						selectedParent += 1
-						if err := dbPut(txn, PrefixBlockChild, parent[:KeyLength-1], keyBlock); err != nil {
-							return err
-						}
-					}
-					block.Parents[i] = parents
-				}
-
-				if err := dbPut(txn, PrefixBlock, keyBlock[:], &block); err != nil {
-					return err
-				}
-
-				// Transactions
-				for _, rpcTransaction := range rpcBlock.Transactions {
-					rpcTxVData := rpcTransaction.VerboseData
-					rpcInputs := rpcTransaction.Inputs
-					rpcOutputs := rpcTransaction.Outputs
-					transaction := Transaction{
-						Hash:     S2h(rpcTxVData.Hash),
-						Id:       S2h(rpcTxVData.TransactionID),
-						Version:  rpcTransaction.Version,
-						LockTime: rpcTransaction.LockTime,
-						Payload:  S2b(rpcTransaction.Payload),
-						Mass:     rpcTxVData.Mass,
-						Inputs:   make([]Input, len(rpcInputs)),
-						Outputs:  make([]Output, len(rpcOutputs)),
+					block := Block{
+						Hash:               blockHash,
+						IsHeaderOnly:       rpcVData.IsHeaderOnly,
+						BlueScore:          rpcVData.BlueScore,
+						Version:            rpcHeader.Version,
+						MerkleRoot:         S2h(rpcHeader.HashMerkleRoot),
+						AcceptedMerkleRoot: S2h(rpcHeader.AcceptedIDMerkleRoot),
+						UtxoCommitment:     S2h(rpcHeader.UTXOCommitment),
+						Timestamp:          uint64(rpcHeader.Timestamp),
+						Bits:               rpcHeader.Bits,
+						Nonce:              rpcHeader.Nonce,
+						DaaScore:           rpcHeader.DAAScore,
+						BlueWork:           blueWork,
+						PruningPoint:       S2h(rpcHeader.PruningPoint),
 					}
 
-					for i, rpcInput := range rpcInputs {
-						rpcPrevious := rpcInput.PreviousOutpoint
-						transaction.Inputs[i] = Input{
-							Sequence:              rpcInput.Sequence,
-							PreviousTransactionID: S2h(rpcPrevious.TransactionID),
-							PreviousIndex:         rpcPrevious.Index,
-							SignatureScript:       S2b(rpcInput.SignatureScript),
-							SignatureOpCount:      rpcInput.SigOpCount,
-						}
-					}
-					for i, rpcOutput := range rpcOutputs {
-						rpcSPK := rpcOutput.ScriptPublicKey
-						rpcOutputVData := rpcOutput.VerboseData
-						fmt.Printf("SPKA: %s\n", rpcOutputVData.ScriptPublicKeyAddress)
-						address := rpcOutputVData.ScriptPublicKeyAddress
-						transaction.Outputs[i] = Output{
-							Amount:                 rpcOutput.Amount,
-							ScriptPublicKeyVersion: rpcSPK.Version,
-							ScriptPublicKey:        S2b(rpcSPK.Script),
-							ScriptPublicKeyType:    rpcOutputVData.ScriptPublicKeyType,
-							ScriptPublicKeyAddress: address,
-						}
-						if address != "" {
-							if err := dbPut(txn, PrefixAddress, Serialize(&AddressKey{address, keyBlock}), []byte{}); err != nil {
+					keyBlock := H2k(block.Hash)
+
+					// Parents
+					block.Parents = make([][]Hash, len(rpcHeader.Parents))
+					selectedParent := uint64(0)
+					for i, rpcParentLevel := range rpcHeader.Parents {
+						rpcParent := rpcParentLevel.ParentHashes
+						parents := make([]Hash, len(rpcParent))
+						for j, rpcParent := range rpcParent {
+							parent := S2h(rpcParent)
+							parents[j] = parent
+							if rpcParent == rpcVData.SelectedParentHash {
+								block.SelectedParent = selectedParent
+							}
+							selectedParent += 1
+							if err := dbPut(txn, PrefixBlockChild, parent[:KeyLength-1], &keyBlock, false); err != nil {
 								return err
 							}
 						}
+						block.Parents[i] = parents
 					}
 
-					key := H2k(transaction.Id)
-					if err := dbPut(txn, PrefixTransaction, key[:], &transaction); err != nil {
+					if err := dbPut(txn, PrefixBlock, keyBlock[:], &block, false); err != nil {
 						return err
 					}
 
-					if err := dbPut(txn, PrefixTransactionHash, transaction.Id[:KeyLength-1], &key); err != nil {
-						return err
-					}
+					// Transactions
+					for _, rpcTransaction := range rpcBlock.Transactions {
+						rpcTxVData := rpcTransaction.VerboseData
+						rpcInputs := rpcTransaction.Inputs
+						rpcOutputs := rpcTransaction.Outputs
+						transaction := Transaction{
+							Hash:     S2h(rpcTxVData.Hash),
+							Id:       S2h(rpcTxVData.TransactionID),
+							Version:  rpcTransaction.Version,
+							LockTime: rpcTransaction.LockTime,
+							Payload:  S2b(rpcTransaction.Payload),
+							Mass:     rpcTxVData.Mass,
+							Inputs:   make([]Input, len(rpcInputs)),
+							Outputs:  make([]Output, len(rpcOutputs)),
+						}
 
-					if err := dbPut(txn, PrefixTransactionBlock, append(key[:], keyBlock[:]...), &[]byte{}); err != nil {
-						return err
-					}
+						for i, rpcInput := range rpcInputs {
+							rpcPrevious := rpcInput.PreviousOutpoint
+							transaction.Inputs[i] = Input{
+								Sequence:              rpcInput.Sequence,
+								PreviousTransactionID: S2h(rpcPrevious.TransactionID),
+								PreviousIndex:         rpcPrevious.Index,
+								SignatureScript:       S2b(rpcInput.SignatureScript),
+								SignatureOpCount:      rpcInput.SigOpCount,
+							}
+						}
+						for i, rpcOutput := range rpcOutputs {
+							rpcSPK := rpcOutput.ScriptPublicKey
+							rpcOutputVData := rpcOutput.VerboseData
+							log(LogDbg, "SPKA: %s", rpcOutputVData.ScriptPublicKeyAddress)
+							address := rpcOutputVData.ScriptPublicKeyAddress
+							transaction.Outputs[i] = Output{
+								Amount:                 rpcOutput.Amount,
+								ScriptPublicKeyVersion: rpcSPK.Version,
+								ScriptPublicKey:        S2b(rpcSPK.Script),
+								ScriptPublicKeyType:    rpcOutputVData.ScriptPublicKeyType,
+								ScriptPublicKeyAddress: address,
+							}
+							if address != "" {
+								if err := dbPut(txn, PrefixAddress, Serialize(&AddressKey{address, keyBlock}), &[]byte{}, false); err != nil {
+									return err
+								}
+							}
+						}
 
+						key := H2k(transaction.Id)
+						if err := dbPut(txn, PrefixTransaction, key[:], &transaction, false); err != nil {
+							return err
+						}
+
+						if err := dbPut(txn, PrefixTransactionHash, transaction.Id[:KeyLength-1], &key, false); err != nil {
+							return err
+						}
+
+						if err := dbPut(txn, PrefixTransactionBlock, append(key[:], keyBlock[:]...), &[]byte{}, false); err != nil {
+							return err
+						}
+
+					}
 				}
+				log(LogInf, "Writing bluest block: %s", hex.EncodeToString(writeElem.BluestHash[:]))
+				return dbPut(txn, PrefixBluestBlock, nil, &writeElem.BluestHash, true)
+			})
+			if !lmdb.IsMapFull(err) {
+				PanicIfErr(err)
 				break
 			}
-			return nil
-		})
-		if err != lmdb.MapFull {
+			info, err := dbEnv.Info()
 			PanicIfErr(err)
-			break
+			mapSize := info.MapSize
+			newMapSize := mapSize + 1<<(bits.Len64(uint64(mapSize))-3)
+			log(LogInf, "Map full, resizing: %d → %d", mapSize, newMapSize)
+			PanicIfErr(dbEnv.SetMapSize(newMapSize))
 		}
-		info, err := dbEnv.Info()
-		PanicIfErr(err)
-		dbEnv.SetMapSize(info.MapSize + 1<<(bits.Len64(uint64(info.MapSize))-3))
+		log(LogInf, "Inserted blocks: %d", len(rpcBlocks))
 	}
 }
 
-func dbPut(txn *lmdb.Txn, prefix byte, key []byte, value interface{}) error {
-	err := txn.Put(db, append([]byte{prefix}, key...), Serialize(value), lmdb.NoOverwrite)
-	if err != nil && err.(*lmdb.OpError).Errno == lmdb.KeyExist {
-		log(LogDbg, "dbPut key exist: %v", key)
+func dbGet(prefix byte, key []byte, value interface{}) bool {
+	var binValue Bytes
+	err := dbEnv.View(func(txn *lmdb.Txn) (err error) {
+		binValue, err = txn.Get(db, append([]byte{prefix}, key...))
+		return err
+	})
+	if lmdb.IsNotFound(err) {
+		return false
+	}
+	PanicIfErr(err)
+	SerializeValue(false, bytes.NewBuffer(binValue), reflect.ValueOf(value).Elem())
+	return true
+}
+
+func dbPut(txn *lmdb.Txn, prefix byte, key []byte, value interface{}, overwrite bool) error {
+	binKey := append([]byte{prefix}, key...)
+	binValue := Serialize(value)
+	stringKey := hex.EncodeToString(binKey)
+	log(LogTrc, "Put: %s: %s", stringKey, hex.EncodeToString(binValue))
+	flags := uint(lmdb.NoOverwrite)
+	if overwrite {
+		flags = 0
+	}
+	err := txn.Put(db, binKey, binValue, flags)
+	if lmdb.IsErrno(err, lmdb.KeyExist) {
+		log(LogDbg, "dbPut key exist: %s", stringKey)
 		err = nil
 	}
 	return err
@@ -435,9 +495,10 @@ const (
 	LogWrn
 	LogInf
 	LogDbg
+	LogTrc
 )
 
-var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG"}
+var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG", "TRC"}
 
 func log(level byte, format string, args ...interface{}) {
 	if level <= byte(*logLevel) {
