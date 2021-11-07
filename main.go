@@ -4,30 +4,20 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/app/appmessage"
 	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 	"math/bits"
+	"net/http"
 	"os"
 	"reflect"
-	"time"
+	"strings"
 )
 
-const ProgName = "katnip"
-const HashLength = 32
-
 const KeyLength = 16
-
-type Hash [HashLength]byte
-type Key [KeyLength]byte
-type Bytes []byte
-type RpcBlocks []*appmessage.RPCBlock
-type WriteChanType chan WriteChanElem
-
-/*
-type HashRest [HashLength - KeyLength]byte*/
 
 const (
 	PrefixBluestBlock byte = iota
@@ -39,74 +29,96 @@ const (
 	PrefixAddress
 )
 
-type Block struct {
-	Hash               Hash
-	IsHeaderOnly       bool
-	BlueScore          uint64
-	Version            uint32
-	SelectedParent     uint64
-	Parents            [][]Hash
-	MerkleRoot         Hash
-	AcceptedMerkleRoot Hash
-	UtxoCommitment     Hash
-	Timestamp          uint64
-	Bits               uint32
-	Nonce              uint64 "f"
-	DaaScore           uint64
-	BlueWork           Bytes
-	PruningPoint       Hash
-}
+const (
+	LogOff = iota
+	LogErr
+	LogWrn
+	LogInf
+	LogDbg
+	LogTrc
+)
 
-type Transaction struct {
-	Hash     Hash
-	Id       Hash
-	Version  uint16
-	LockTime uint64
-	Payload  Bytes
-	Mass     uint64
-	Inputs   []Input
-	Outputs  []Output
-}
+type (
+	UInt64Full uint64
+	Hash       [32]byte
+	Key        [KeyLength]byte
+	Bytes      []byte
+	RpcBlocks  []*appmessage.RPCBlock
 
-type Input struct {
-	Sequence              uint64
-	PreviousTransactionID Hash
-	PreviousIndex         uint32
-	SignatureScript       Bytes
-	SignatureOpCount      byte
-}
+	AddressKey struct {
+		Address  string
+		BlockKey Key
+	}
 
-type Output struct {
-	Amount                 uint64
-	ScriptPublicKeyVersion uint16
-	ScriptPublicKey        Bytes
-	ScriptPublicKeyType    string
-	ScriptPublicKeyAddress string
-}
+	WriteChanElem struct {
+		RpcBlocks  RpcBlocks
+		BluestHash *Hash
+	}
+)
 
-type AddressKey struct {
-	Address  string
-	BlockKey Key
-}
+type (
+	Block struct {
+		Hash               Hash
+		IsHeaderOnly       bool
+		BlueScore          uint64
+		Version            uint32
+		SelectedParent     uint64
+		Parents            [][]Hash
+		MerkleRoot         Hash
+		AcceptedMerkleRoot Hash
+		UtxoCommitment     Hash
+		Timestamp          uint64
+		Bits               uint32
+		Nonce              UInt64Full
+		DaaScore           uint64
+		BlueWork           Bytes
+		PruningPoint       Hash
+	}
 
-type WriteChanElem struct {
-	RpcBlocks  RpcBlocks
-	BluestHash Hash
-}
+	Transaction struct {
+		Hash     Hash
+		Id       Hash
+		Version  uint16
+		LockTime uint64
+		Payload  Bytes
+		Mass     uint64
+		Inputs   []Input
+		Outputs  []Output
+	}
+
+	Input struct {
+		Sequence              uint64
+		PreviousTransactionID Hash
+		PreviousIndex         uint32
+		SignatureScript       Bytes
+		SignatureOpCount      byte
+	}
+
+	Output struct {
+		Amount                 uint64
+		ScriptPublicKeyVersion uint16
+		ScriptPublicKey        Bytes
+		ScriptPublicKeyType    string
+		ScriptPublicKeyAddress string
+	}
+)
 
 var logLevel *int
+var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG", "TRC"}
+
 var (
 	dbEnv *lmdb.Env
 	db    lmdb.DBI
 )
 
-var WriteChan WriteChanType
-var MaxBlueWork Bytes
-var BluestHash Hash
+var WriteChan = make(chan WriteChanElem, 100)
+var MaxBlueWorkStr string
+var BluestHashStr string
 
 func main() {
-	rpcServer := flag.String("rpcserver", "0.0.0.0:16110", "Kaspa RPC server address")
-	logLevel = flag.Int("loglevel", LogWrn, "Log level (off = 0, error = 1, wargning = 2, info = 3, debug = 4, trace = 5), default: 2")
+	rpcServerAddr := flag.String("rpcserver", "0.0.0.0:16110", "Kaspa RPC server address")
+	httpServerAddr := flag.String("httpserver", "0.0.0.0:8080", "HTTP server address and port")
+	logLevel = flag.Int("loglevel", LogWrn, "Log level (off = 0, error = 1, warning = 2, info = 3, debug = 4, trace = 5), default: 2")
 	flag.Parse()
 	if len(flag.Args()) > 0 {
 		flag.Usage()
@@ -119,8 +131,8 @@ func main() {
 	PanicIfErr(dbEnv.SetMapSize(1 << 20))
 	cacheDir, err := os.UserCacheDir()
 	PanicIfErr(err)
-	dbDir := cacheDir + "/" + ProgName
-	log(LogInf, "Database dir: %s", dbDir)
+	dbDir := cacheDir + "/katnip"
+	Log(LogInf, "Database dir: %s", dbDir)
 	PanicIfErr(os.MkdirAll(dbDir, 0755))
 	PanicIfErr(dbEnv.Open(dbDir, lmdb.WriteMap|lmdb.NoLock, 0644))
 	PanicIfErr(dbEnv.Update(func(txn *lmdb.Txn) (err error) {
@@ -128,62 +140,132 @@ func main() {
 		return err
 	}))
 
-	lowHashStr := ""
-	maxBlueWork := ""
-	if dbGet(PrefixBluestBlock, nil, &BluestHash) {
-		lowHashStr = hex.EncodeToString(BluestHash[:])
-		log(LogInf, "Bluest block hash: %s", lowHashStr)
-	}
-
 	var rpcClient *rpcclient.RPCClient
 	for {
-		log(LogInf, "Connecting to Kaspad: %s", *rpcServer)
-		rpcClient, err = rpcclient.NewRPCClient(*rpcServer)
+		Log(LogInf, "Connecting to Kaspad: %s", *rpcServerAddr)
+		rpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
 		if err == nil {
 			break
 		} else {
-			log(LogErr, "%v", err)
+			Log(LogErr, "%v", err)
 		}
 	}
 
 	PanicIfErr(err)
-	log(LogInf, "IBD stared")
+	Log(LogInf, "IBD stared")
 
-	WriteChan = make(WriteChanType, 10)
+	var BluestHash Hash
+	if dbGet(PrefixBluestBlock, nil, &BluestHash) {
+		BluestHashStr = hex.EncodeToString(BluestHash[:])
+		Log(LogInf, "Bluest block hash: %s", BluestHashStr)
+	}
+
 	go insert()
+
+	http.Handle("/style.css", http.FileServer(http.Dir(".")))
+	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogErr, "Path: %v", r.URL.Path)
+		path := strings.Split(r.URL.Path, "/")
+		if len(path) < 3 {
+			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
+			return
+		}
+		hashSlice, err := hex.DecodeString(path[2])
+		if err != nil {
+			HttpError(errors.New(fmt.Sprintf("Bad hash: %v", path)), " decoding hash", w)
+			return
+		}
+		block := Block{}
+		//Log(LogErr, "Get Block full (%d): %v", len(hashSlice), hashSlice)
+		//Log(LogErr, "Get Block (%d): %v", len(hashSlice[:KeyLength]), hashSlice[0:KeyLength])
+		if !dbGet(PrefixBlock, hashSlice[0:KeyLength], &block) {
+			HttpError(errors.New("key not found: "+path[2]), "", w)
+			return
+		}
+
+		w.Write([]byte("<!DOCTYPE html>\n" +
+			"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\">\n" +
+			"<head>\n" +
+			"<meta charset=\"UTF-8\"/>\n" +
+			"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
+			"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
+			"<title>Katnip</title>\n" +
+			"</head>\n" +
+			"<body>\n" +
+			"<table>\n" +
+			"<tbody>\n"))
+		metaStruct := reflect.ValueOf(block)
+		for i := 0; i < metaStruct.NumField(); i++ {
+			field := metaStruct.Type().Field(i)
+			v := metaStruct.Field(i).Interface()
+			name := field.Name
+			title := ToTitle(name)
+			fmt.Fprintf(w, "<tr><th>%s</th><td>%v</td></tr>\n", title, v)
+		}
+		w.Write([]byte("</tbody>\n" +
+			"</table>\n" +
+			"</html>"))
+	})
+	go http.ListenAndServe(*httpServerAddr, nil)
 
 	var response *appmessage.GetBlocksResponseMessage
 	ibdCount := 0
 	for {
-		log(LogInf, "getBlocks: %s", lowHashStr)
-		response, err = rpcClient.GetBlocks(lowHashStr, true, true)
+		Log(LogInf, "getBlocks: %s", BluestHashStr)
+		response, err = rpcClient.GetBlocks(BluestHashStr, true, true)
 		if err != nil {
-			log(LogErr, "getBlocks: %s", err)
+			Log(LogErr, "getBlocks: %s", err)
 			continue
 		}
 		rpcBlocks := response.Blocks
 		count := len(rpcBlocks)
-		if lowHashStr != "" && count == 1 {
+		if BluestHashStr != "" && count == 1 {
 			break
 		}
 		ibdCount += count
+		AddToWriteChan(rpcBlocks)
+	}
+	Log(LogInf, "IBD finished, blocks: %d", ibdCount)
+	PanicIfErr(rpcClient.RegisterForBlockAddedNotifications(func(notification *appmessage.BlockAddedNotificationMessage) {
+		strHash := notification.Block.VerboseData.Hash
+		blockResponse, err := rpcClient.GetBlock(strHash, true)
+		PanicIfErr(err)
+		AddToWriteChan(RpcBlocks{blockResponse.Block})
+	}))
 
-		for _, rpcBlock := range rpcBlocks {
-			blueWork := rpcBlock.Header.BlueWork
-			if len(blueWork) > len(maxBlueWork) || len(blueWork) == len(maxBlueWork) && blueWork > maxBlueWork {
-				maxBlueWork = blueWork
-				lowHashStr = rpcBlock.VerboseData.Hash
-			}
+	select {}
+}
+
+func HttpError(err error, title string, w http.ResponseWriter) bool {
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte("<!DOCTYPE html>\n" +
+		"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\">\n" +
+		"<head>\n" +
+		"<meta charset=\"UTF-8\"/>\n" +
+		"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
+		"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
+		"<title>Katnip</title>\n" +
+		"</head>\n" +
+		"<body>\n" +
+		"<h1>Error" + title + "</h1>\n" +
+		"<p>" + fmt.Sprintf("%v", err) + "</p>\n" +
+		"</body>\n" +
+		"</html>"))
+	return true
+}
+
+func AddToWriteChan(rpcBlocks RpcBlocks) {
+	var bluestHashToWrite *Hash = nil
+	for _, rpcBlock := range rpcBlocks {
+		blueWorkStr := rpcBlock.Header.BlueWork
+		if len(blueWorkStr) > len(MaxBlueWorkStr) || len(blueWorkStr) == len(MaxBlueWorkStr) && blueWorkStr > MaxBlueWorkStr {
+			MaxBlueWorkStr = blueWorkStr
+			BluestHashStr = rpcBlock.VerboseData.Hash
+			bluestHash := S2h(BluestHashStr)
+			bluestHashToWrite = &bluestHash
 		}
-		WriteChan <- WriteChanElem{rpcBlocks, S2h(lowHashStr)}
 	}
-	log(LogInf, "IBD finished, blocks: %d", ibdCount)
-	for {
-		blockAdded := <-rpcClient.OnBlockAdded:
-			blockResponse, err := client.GetBlock(blockAdded.Block.VerboseData.Hash, true)
-			PanicIfErr(err)
-			insert([]*appmessage.RPCBlock{blockResponse.Block})
-	}
+	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite}
 }
 
 func insert() {
@@ -208,7 +290,7 @@ func insert() {
 						UtxoCommitment:     S2h(rpcHeader.UTXOCommitment),
 						Timestamp:          uint64(rpcHeader.Timestamp),
 						Bits:               rpcHeader.Bits,
-						Nonce:              rpcHeader.Nonce,
+						Nonce:              UInt64Full(rpcHeader.Nonce),
 						DaaScore:           rpcHeader.DAAScore,
 						BlueWork:           blueWork,
 						PruningPoint:       S2h(rpcHeader.PruningPoint),
@@ -229,13 +311,15 @@ func insert() {
 								block.SelectedParent = selectedParent
 							}
 							selectedParent += 1
-							if err := dbPut(txn, PrefixBlockChild, parent[:KeyLength-1], &keyBlock, false); err != nil {
+							if err := dbPut(txn, PrefixBlockChild, parent[:KeyLength], &keyBlock, false); err != nil {
 								return err
 							}
 						}
 						block.Parents[i] = parents
 					}
 
+					//Log(LogErr, "keyBlock full (%d): %v", len(block.Hash[:]), block.Hash[:])
+					//Log(LogErr, "keyBlock (%d): %v", len(keyBlock[:]), keyBlock[:])
 					if err := dbPut(txn, PrefixBlock, keyBlock[:], &block, false); err != nil {
 						return err
 					}
@@ -269,7 +353,6 @@ func insert() {
 						for i, rpcOutput := range rpcOutputs {
 							rpcSPK := rpcOutput.ScriptPublicKey
 							rpcOutputVData := rpcOutput.VerboseData
-							log(LogDbg, "SPKA: %s", rpcOutputVData.ScriptPublicKeyAddress)
 							address := rpcOutputVData.ScriptPublicKeyAddress
 							transaction.Outputs[i] = Output{
 								Amount:                 rpcOutput.Amount,
@@ -290,7 +373,7 @@ func insert() {
 							return err
 						}
 
-						if err := dbPut(txn, PrefixTransactionHash, transaction.Id[:KeyLength-1], &key, false); err != nil {
+						if err := dbPut(txn, PrefixTransactionHash, transaction.Id[:KeyLength], &key, false); err != nil {
 							return err
 						}
 
@@ -300,8 +383,14 @@ func insert() {
 
 					}
 				}
-				log(LogInf, "Writing bluest block: %s", hex.EncodeToString(writeElem.BluestHash[:]))
-				return dbPut(txn, PrefixBluestBlock, nil, &writeElem.BluestHash, true)
+				bluestHash := writeElem.BluestHash
+				if bluestHash != nil {
+					Log(LogInf, "Writing bluest block: %s", hex.EncodeToString((*bluestHash)[:]))
+					if err := dbPut(txn, PrefixBluestBlock, nil, bluestHash, true); err != nil {
+						return err
+					}
+				}
+				return nil
 			})
 			if !lmdb.IsMapFull(err) {
 				PanicIfErr(err)
@@ -310,11 +399,12 @@ func insert() {
 			info, err := dbEnv.Info()
 			PanicIfErr(err)
 			mapSize := info.MapSize
-			newMapSize := mapSize + 1<<(bits.Len64(uint64(mapSize))-3)
-			log(LogInf, "Map full, resizing: %d → %d", mapSize, newMapSize)
+			mapSizeBits := bits.Len64(uint64(mapSize)) - 3
+			newMapSize := mapSize&(0b111<<mapSizeBits) + 1<<mapSizeBits
+			Log(LogInf, "Map full, resizing: %d → %d", mapSize, newMapSize)
 			PanicIfErr(dbEnv.SetMapSize(newMapSize))
 		}
-		log(LogInf, "Inserted blocks: %d", len(rpcBlocks))
+		Log(LogInf, "Inserted blocks: %d", len(rpcBlocks))
 	}
 }
 
@@ -336,14 +426,14 @@ func dbPut(txn *lmdb.Txn, prefix byte, key []byte, value interface{}, overwrite 
 	binKey := append([]byte{prefix}, key...)
 	binValue := Serialize(value)
 	stringKey := hex.EncodeToString(binKey)
-	log(LogTrc, "Put: %s: %s", stringKey, hex.EncodeToString(binValue))
+	Log(LogTrc, "Put: %s: %s", stringKey, hex.EncodeToString(binValue))
 	flags := uint(lmdb.NoOverwrite)
 	if overwrite {
 		flags = 0
 	}
 	err := txn.Put(db, binKey, binValue, flags)
 	if lmdb.IsErrno(err, lmdb.KeyExist) {
-		log(LogDbg, "dbPut key exist: %s", stringKey)
+		Log(LogDbg, "dbPut key exist: %s", stringKey)
 		err = nil
 	}
 	return err
@@ -359,16 +449,16 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 	value := metaValue.Interface()
 	switch metaValue.Kind() {
 	case reflect.Struct:
-		structType := metaValue.Type()
 		for i := 0; i < metaValue.NumField(); i++ {
 			metaField := metaValue.Field(i)
-			if string(structType.Field(i).Tag) == "f" {
+			if _, isNonce := value.(UInt64Full); isNonce {
 				uintBytes := make([]byte, 8)
 				if isSer {
 					binary.LittleEndian.PutUint64(uintBytes, metaField.Interface().(uint64))
 					buffer.Write(uintBytes)
 				} else {
-					buffer.Read(uintBytes)
+					_, err := buffer.Read(uintBytes)
+					PanicIfErr(err)
 					metaField.SetUint(binary.LittleEndian.Uint64(uintBytes))
 				}
 			} else {
@@ -380,8 +470,8 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 			SerializeLen(buffer, metaValue)
 			SerializeArray(isSer, buffer, metaValue)
 		} else {
-			len := DeserializeLen(buffer)
-			metaSlice := reflect.MakeSlice(metaValue.Type(), len, len)
+			sliceLen := DeserializeLen(buffer)
+			metaSlice := reflect.MakeSlice(metaValue.Type(), sliceLen, sliceLen)
 			SerializeArray(false, buffer, metaSlice)
 			metaValue.Set(metaSlice)
 		}
@@ -391,7 +481,8 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 			buffer.WriteString(value.(string))
 		} else {
 			buf := make([]byte, DeserializeLen(buffer))
-			buffer.Read(buf)
+			_, err := buffer.Read(buf)
+			PanicIfErr(err)
 			metaValue.SetString(string(buf))
 		}
 	case reflect.Array:
@@ -441,9 +532,9 @@ func SerializeLen(buffer *bytes.Buffer, metaValue reflect.Value) {
 }
 
 func DeserializeLen(buffer *bytes.Buffer) int {
-	len := uint64(0)
-	DeserializeUint64(buffer, reflect.ValueOf(&len).Elem())
-	return int(len)
+	sliceLen := uint64(0)
+	DeserializeUint64(buffer, reflect.ValueOf(&sliceLen).Elem())
+	return int(sliceLen)
 }
 
 func SerializeArray(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
@@ -470,7 +561,7 @@ func S2h(s string) (h Hash) {
 }
 
 func H2k(h Hash) (k Key) {
-	copy(k[:], h[:KeyLength-1])
+	copy(k[:], h[:KeyLength])
 	return k
 }
 
@@ -483,25 +574,49 @@ func S2b(s string) Bytes {
 	return b
 }
 
+func B2s(b Bytes) string {
+	return hex.EncodeToString(b)
+}
+
+func H2s(h Hash) string {
+	return B2s(h[:])
+}
+
 func PanicIfErr(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
 
-const (
-	LogOff = iota
-	LogErr
-	LogWrn
-	LogInf
-	LogDbg
-	LogTrc
-)
-
-var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG", "TRC"}
-
-func log(level byte, format string, args ...interface{}) {
+func Log(level byte, format string, args ...interface{}) {
 	if level <= byte(*logLevel) {
 		_, _ = fmt.Fprintf(os.Stderr, LevelStr[level]+" "+format+"\n", args...)
 	}
+}
+
+func isUpper(c byte) bool {
+	return c >= 'A' && c <= 'Z'
+}
+
+func ToTitle(s string) string {
+	r := make([]byte, 0, len(s)+2)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isUpper(c) && i > 0 && i+1 < len(s) && !(isUpper(s[i-1]) && isUpper(s[i+1])) {
+			r = append(r, ' ')
+		}
+		r = append(r, c)
+	}
+	return string(r)
+}
+
+func TrimZeroes(s string) string {
+	var i int
+	for i = 0; i < len(s); i++ {
+		if s[i] != '0' {
+			break
+		}
+	}
+	s = s[i:]
+	return s
 }

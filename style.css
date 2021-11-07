@@ -1,0 +1,49 @@
+@media not all and (max-width: 30rem) { :root { --margin: 1rem;  --text-align: justify; --text-indent: 2rem } }
+@media (max-width: 30rem)             { :root { --margin: .4rem; --text-align: unset;   --text-indent: 1rem } }
+@media print { :root { --margin: 0 } }
+
+:root {
+	--dimness: 0.2;
+	--half-margin: calc(var(--margin) / 2);
+}
+
+@media (prefers-color-scheme: dark), (prefers-color-scheme: no-preference) { :root { --back: 0%;   --op: + } }
+@media (prefers-color-scheme: light) { :root { --back: 100%; --op: - } }
+
+:root {
+	--hue-title:   calc( 4turn/12);
+	--hue-caption: calc( 2turn/12);
+	--hue-a:       calc( 8turn/12);
+	--hue-visited: calc(10turn/12);
+	--percent-aux: 50%;
+	--lum-fore: calc(var(--back) var(--op) (1 - var(--dimness)) * 100%);
+	--lum-aux: calc(var(--back) var(--op) (100% - var(--percent-aux)));
+	--saturation-aux: 25%;
+	--color-aux: hsl(0, 0%, var(--lum-aux));
+	
+	--color-title: hsl(var(--hue-title), 100%, calc(var(--back) var(--op) 75%));
+	--color-caption:     hsl(var(--hue-caption), 75%, var(--lum-fore));
+	--color-caption-aux: hsl(var(--hue-caption), var(--saturation-aux), var(--lum-aux));
+	
+	--color-back:   hsl(0, 0%, calc(var(--back) var(--op) 2/16*100%));
+	--color-sup:    hsl(0, 0%, calc(var(--back) var(--op) 4/16*100%));
+	--color-fore:   hsl(0, 0%, var(--lum-fore));
+	--color-bright: hsl(0, 0%, calc(var(--back) var(--op) 200%));
+}
+
+body { font-family: sans-serif; padding: 0 var(--margin); background-color: var(--color-back); color: var(--color-fore) }
+
+* { border-width: 1px; border-color: hsl(0, 0%, calc(var(--back) var(--op) 30%)) }
+
+a { text-decoration: none; color: hsl(var(--hue-a), 100%, var(--lum-fore)) }
+a:visited { color: hsl(var(--hue-visited), 100%, var(--lum-fore)) }
+
+table { border-collapse: collapse; max-width: 100% }
+th { font-weight: normal; text-align: right }
+td, th { border-style: solid; padding: .2em .3em }
+tbody > tr > th { vertical-align: top }
+td { font-family: monospace }
+
+table { margin: var(--margin) auto; padding: 0 }
+th { color: var(--color-caption) }
+
