@@ -20,11 +20,11 @@
 	--lum-aux: calc(var(--back) var(--op) (100% - var(--percent-aux)));
 	--saturation-aux: 25%;
 	--color-aux: hsl(0, 0%, var(--lum-aux));
-	
+
 	--color-title: hsl(var(--hue-title), 100%, calc(var(--back) var(--op) 75%));
 	--color-caption:     hsl(var(--hue-caption), 75%, var(--lum-fore));
 	--color-caption-aux: hsl(var(--hue-caption), var(--saturation-aux), var(--lum-aux));
-	
+
 	--color-back:   hsl(0, 0%, calc(var(--back) var(--op) 2/16*100%));
 	--color-sup:    hsl(0, 0%, calc(var(--back) var(--op) 4/16*100%));
 	--color-fore:   hsl(0, 0%, var(--lum-fore));
@@ -39,11 +39,15 @@ a { text-decoration: none; color: hsl(var(--hue-a), 100%, var(--lum-fore)) }
 a:visited { color: hsl(var(--hue-visited), 100%, var(--lum-fore)) }
 
 table { border-collapse: collapse; max-width: 100% }
-th { font-weight: normal; text-align: right }
+th { font-weight: normal; font-size: small }
+tbody > tr > th { text-align: right }
 td, th { border-style: solid; padding: .2em .3em }
 tbody > tr > th { vertical-align: top }
 td { font-family: monospace }
 
 table { margin: var(--margin) auto; padding: 0 }
 th { color: var(--color-caption) }
-
+.tr {display: table-row }
+.table {display: table }
+.thead {display: table-header-group }
+.tbody {display: table-row-group }

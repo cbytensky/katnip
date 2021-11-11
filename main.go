@@ -2,60 +2,42 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"flag"
-	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/app/appmessage"
 	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 	"math/bits"
-	"net/http"
 	"os"
 	"reflect"
 	"strings"
+	"time"
 )
 
-const KeyLength = 16
+const KeyLength = 16 // length of part of hash that is used as DB keys (it is not necessary to use all of 32 bytes)
+const ProgName = "Katnip"
 
+// These byte values are used as first bytes of DB keys to indicate type of data
 const (
-	PrefixBluestBlock byte = iota
-	PrefixBlock
+	PrefixBlock byte = iota
 	PrefixBlockChild
 	PrefixTransaction
 	PrefixTransactionHash
 	PrefixTransactionBlock
 	PrefixAddress
+	PrefixBluestBlock
+	PrefixPruningPoints
 )
 
-const (
-	LogOff = iota
-	LogErr
-	LogWrn
-	LogInf
-	LogDbg
-	LogTrc
-)
-
+// types that is used in blockDAG structs
 type (
-	UInt64Full uint64
 	Hash       [32]byte
-	Key        [KeyLength]byte
+	UInt64Full uint64          // is used to distinguish from uint values that is stored in compact form
+	Key        [KeyLength]byte // DB hash key type
 	Bytes      []byte
-	RpcBlocks  []*appmessage.RPCBlock
-
-	AddressKey struct {
-		Address  string
-		BlockKey Key
-	}
-
-	WriteChanElem struct {
-		RpcBlocks  RpcBlocks
-		BluestHash *Hash
-	}
 )
 
+// structs of blockDAG elements
 type (
 	Block struct {
 		Hash               Hash
@@ -63,7 +45,8 @@ type (
 		BlueScore          uint64
 		Version            uint32
 		SelectedParent     uint64
-		Parents            [][]Hash
+		Parents            []Hash
+		ParentLevels       [][]uint64
 		MerkleRoot         Hash
 		AcceptedMerkleRoot Hash
 		UtxoCommitment     Hash
@@ -72,7 +55,7 @@ type (
 		Nonce              UInt64Full
 		DaaScore           uint64
 		BlueWork           Bytes
-		PruningPoint       Hash
+		PruningPoint       uint64
 	}
 
 	Transaction struct {
@@ -101,44 +84,61 @@ type (
 		ScriptPublicKeyType    string
 		ScriptPublicKeyAddress string
 	}
+
+	AddressKey struct {
+		Address  string
+		BlockKey Key
+	}
 )
 
-var logLevel *int
-var LevelStr = [...]string{"", "ERR", "WRN", "INF", "DBG", "TRC"}
+type RpcBlocks []*appmessage.RPCBlock
 
-var (
-	dbEnv *lmdb.Env
-	db    lmdb.DBI
-)
+type WriteChanElem struct {
+	RpcBlocks  RpcBlocks
+	BluestHash *Hash
+}
 
-var WriteChan = make(chan WriteChanElem, 100)
+var DbEnv *lmdb.Env
+var Db lmdb.DBI
+
+var WriteChan = make(chan WriteChanElem, 10)
+
 var MaxBlueWorkStr string
 var BluestHashStr string
+var PruningPointsStr = make(map[string]uint64, 1)
+var LatestHashes [10]*Hash
+var LatestHashesTop int
 
 func main() {
+	dirName, err := os.UserHomeDir()
+	PanicIfErr(err)
+	defaultDbFileName := dirName + "/" + strings.ToLower(ProgName) + ".mdb"
+
+	// Process command line arguments
 	rpcServerAddr := flag.String("rpcserver", "0.0.0.0:16110", "Kaspa RPC server address")
-	httpServerAddr := flag.String("httpserver", "0.0.0.0:8080", "HTTP server address and port")
-	logLevel = flag.Int("loglevel", LogWrn, "Log level (off = 0, error = 1, warning = 2, info = 3, debug = 4, trace = 5), default: 2")
+	dbFileName := flag.String("dbfile", defaultDbFileName, "Database file name")
+	AddFlagHttp()
+	AddFlagLog()
 	flag.Parse()
 	if len(flag.Args()) > 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
+	Log(LogInf, "Log level: %d", *LogLevel)
 
-	var err error
-	dbEnv, err = lmdb.NewEnv()
+	go HttpServe()
+
+	DbEnv, err = lmdb.NewEnv()
 	PanicIfErr(err)
-	PanicIfErr(dbEnv.SetMapSize(1 << 20))
-	cacheDir, err := os.UserCacheDir()
-	PanicIfErr(err)
-	dbDir := cacheDir + "/katnip"
-	Log(LogInf, "Database dir: %s", dbDir)
-	PanicIfErr(os.MkdirAll(dbDir, 0755))
-	PanicIfErr(dbEnv.Open(dbDir, lmdb.WriteMap|lmdb.NoLock, 0644))
-	PanicIfErr(dbEnv.Update(func(txn *lmdb.Txn) (err error) {
-		db, err = txn.OpenRoot(0)
+	PanicIfErr(DbEnv.SetMapSize(1 << 26)) // 1 GB
+	Log(LogInf, "Database file: %s", *dbFileName)
+	PanicIfErr(DbEnv.Open(*dbFileName, lmdb.NoSubdir|lmdb.WriteMap|lmdb.NoMetaSync|lmdb.NoSync|lmdb.MapAsync|lmdb.NoLock|lmdb.NoMemInit, 0644))
+	PanicIfErr(DbEnv.Update(func(txn *lmdb.Txn) (err error) {
+		Db, err = txn.OpenRoot(0)
 		return err
 	}))
+
+	go InsertingToDb()
 
 	var rpcClient *rpcclient.RPCClient
 	for {
@@ -146,116 +146,86 @@ func main() {
 		rpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
 		if err == nil {
 			break
-		} else {
-			Log(LogErr, "%v", err)
 		}
+		Log(LogErr, "%v", err)
 	}
 
-	PanicIfErr(err)
+	idbStartTime := time.Now()
 	Log(LogInf, "IBD stared")
 
-	var BluestHash Hash
-	if dbGet(PrefixBluestBlock, nil, &BluestHash) {
-		BluestHashStr = hex.EncodeToString(BluestHash[:])
-		Log(LogInf, "Bluest block hash: %s", BluestHashStr)
+	var bluestHash Hash
+	if dbGet(PrefixBluestBlock, nil, &bluestHash) {
+		BluestHashStr = H2s(bluestHash)
+		Log(LogInf, "Stored bluest block: %s", BluestHashStr)
+	} else {
+		Log(LogInf, "Bluest block not stored")
 	}
 
-	go insert()
-
-	http.Handle("/style.css", http.FileServer(http.Dir(".")))
-	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogErr, "Path: %v", r.URL.Path)
-		path := strings.Split(r.URL.Path, "/")
-		if len(path) < 3 {
-			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
-			return
+	_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+		cursor, err := txn.OpenCursor(Db)
+		PanicIfErr(err)
+		key, val, err := cursor.Get([]byte{PrefixPruningPoints}, nil, lmdb.SetRange)
+		if lmdb.IsErrno(err, lmdb.NotFound) {
+			Log(LogInf, "Pruning points not stored")
+			return nil
 		}
-		hashSlice, err := hex.DecodeString(path[2])
-		if err != nil {
-			HttpError(errors.New(fmt.Sprintf("Bad hash: %v", path)), " decoding hash", w)
-			return
+		PanicIfErr(err)
+		for {
+			var pruningPointIndex uint64
+			var pruningPoint Hash
+			SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&pruningPointIndex).Elem())
+			SerializeValue(false, bytes.NewBuffer(val), reflect.ValueOf(&pruningPoint).Elem())
+			pruningPointStr := H2s(pruningPoint)
+			PruningPointsStr[pruningPointStr] = pruningPointIndex
+			Log(LogInf, "Stored pruning point %d: %s", pruningPointIndex, pruningPointStr)
+			key, val, err = cursor.Get(nil, nil, lmdb.Next)
+			if lmdb.IsErrno(err, lmdb.NotFound) {
+				break
+			}
+			PanicIfErr(err)
 		}
-		block := Block{}
-		//Log(LogErr, "Get Block full (%d): %v", len(hashSlice), hashSlice)
-		//Log(LogErr, "Get Block (%d): %v", len(hashSlice[:KeyLength]), hashSlice[0:KeyLength])
-		if !dbGet(PrefixBlock, hashSlice[0:KeyLength], &block) {
-			HttpError(errors.New("key not found: "+path[2]), "", w)
-			return
-		}
-
-		w.Write([]byte("<!DOCTYPE html>\n" +
-			"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\">\n" +
-			"<head>\n" +
-			"<meta charset=\"UTF-8\"/>\n" +
-			"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
-			"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
-			"<title>Katnip</title>\n" +
-			"</head>\n" +
-			"<body>\n" +
-			"<table>\n" +
-			"<tbody>\n"))
-		metaStruct := reflect.ValueOf(block)
-		for i := 0; i < metaStruct.NumField(); i++ {
-			field := metaStruct.Type().Field(i)
-			v := metaStruct.Field(i).Interface()
-			name := field.Name
-			title := ToTitle(name)
-			fmt.Fprintf(w, "<tr><th>%s</th><td>%v</td></tr>\n", title, v)
-		}
-		w.Write([]byte("</tbody>\n" +
-			"</table>\n" +
-			"</html>"))
+		return nil
 	})
-	go http.ListenAndServe(*httpServerAddr, nil)
-
-	var response *appmessage.GetBlocksResponseMessage
 	ibdCount := 0
 	for {
-		Log(LogInf, "getBlocks: %s", BluestHashStr)
-		response, err = rpcClient.GetBlocks(BluestHashStr, true, true)
+		Log(LogDbg, "getBlocks: %s", BluestHashStr)
+		response, err := rpcClient.GetBlocks(BluestHashStr, true, true)
 		if err != nil {
-			Log(LogErr, "getBlocks: %s", err)
+			Log(LogErr, "%v", err)
 			continue
 		}
 		rpcBlocks := response.Blocks
-		count := len(rpcBlocks)
-		if BluestHashStr != "" && count == 1 {
+		numBlocks := len(rpcBlocks) - 1
+		ibdCount += numBlocks
+		bluestHashStrLast := BluestHashStr
+		AddToWriteChan(rpcBlocks)
+		if bluestHashStrLast == BluestHashStr {
 			break
 		}
-		ibdCount += count
-		AddToWriteChan(rpcBlocks)
+		Log(LogInf, "Inserting blocks: %3d, %s", numBlocks, TimestampFormat(uint64(rpcBlocks[len(rpcBlocks)-1].Header.Timestamp)))
 	}
-	Log(LogInf, "IBD finished, blocks: %d", ibdCount)
+	duration := time.Since(idbStartTime).Round(time.Second)
+	seconds := int(duration.Seconds())
+	bps := 0
+	if seconds != 0 {
+		bps = ibdCount / seconds
+	}
+	DbEnv.Sync(true)
+	Log(LogInf, "IBD finished: %d blocks, %s, %d bps", ibdCount, duration, bps)
+
 	PanicIfErr(rpcClient.RegisterForBlockAddedNotifications(func(notification *appmessage.BlockAddedNotificationMessage) {
-		strHash := notification.Block.VerboseData.Hash
-		blockResponse, err := rpcClient.GetBlock(strHash, true)
+		hashStr := notification.Block.VerboseData.Hash
+		blockResponse, err := rpcClient.GetBlock(hashStr, true)
 		PanicIfErr(err)
 		AddToWriteChan(RpcBlocks{blockResponse.Block})
+		Log(LogInf, "Added block: %s", hashStr)
 	}))
 
 	select {}
 }
 
-func HttpError(err error, title string, w http.ResponseWriter) bool {
-	w.WriteHeader(http.StatusNotFound)
-	w.Write([]byte("<!DOCTYPE html>\n" +
-		"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\">\n" +
-		"<head>\n" +
-		"<meta charset=\"UTF-8\"/>\n" +
-		"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
-		"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
-		"<title>Katnip</title>\n" +
-		"</head>\n" +
-		"<body>\n" +
-		"<h1>Error" + title + "</h1>\n" +
-		"<p>" + fmt.Sprintf("%v", err) + "</p>\n" +
-		"</body>\n" +
-		"</html>"))
-	return true
-}
-
 func AddToWriteChan(rpcBlocks RpcBlocks) {
-	var bluestHashToWrite *Hash = nil
+	var bluestHashToWrite *Hash
 	for _, rpcBlock := range rpcBlocks {
 		blueWorkStr := rpcBlock.Header.BlueWork
 		if len(blueWorkStr) > len(MaxBlueWorkStr) || len(blueWorkStr) == len(MaxBlueWorkStr) && blueWorkStr > MaxBlueWorkStr {
@@ -268,12 +238,13 @@ func AddToWriteChan(rpcBlocks RpcBlocks) {
 	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite}
 }
 
-func insert() {
+func InsertingToDb() {
+	Log(LogInf, "Writing to DB routine started")
 	for {
 		writeElem := <-WriteChan
 		rpcBlocks := writeElem.RpcBlocks
 		for {
-			err := dbEnv.Update(func(txn *lmdb.Txn) (err error) {
+			err := DbEnv.Update(func(txn *lmdb.Txn) (err error) {
 				for _, rpcBlock := range rpcBlocks {
 					rpcVData := rpcBlock.VerboseData
 					rpcHeader := rpcBlock.Header
@@ -293,33 +264,55 @@ func insert() {
 						Nonce:              UInt64Full(rpcHeader.Nonce),
 						DaaScore:           rpcHeader.DAAScore,
 						BlueWork:           blueWork,
-						PruningPoint:       S2h(rpcHeader.PruningPoint),
 					}
-
 					keyBlock := H2k(block.Hash)
 
-					// Parents
-					block.Parents = make([][]Hash, len(rpcHeader.Parents))
-					selectedParent := uint64(0)
-					for i, rpcParentLevel := range rpcHeader.Parents {
-						rpcParent := rpcParentLevel.ParentHashes
-						parents := make([]Hash, len(rpcParent))
-						for j, rpcParent := range rpcParent {
-							parent := S2h(rpcParent)
-							parents[j] = parent
-							if rpcParent == rpcVData.SelectedParentHash {
-								block.SelectedParent = selectedParent
-							}
-							selectedParent += 1
-							if err := dbPut(txn, PrefixBlockChild, parent[:KeyLength], &keyBlock, false); err != nil {
-								return err
-							}
+					// Pruning point
+					pruningPointStr := rpcHeader.PruningPoint
+					pruningPointIndex, ok := PruningPointsStr[pruningPointStr]
+					if !ok {
+						pruningPointIndex = uint64(len(PruningPointsStr))
+						hash := S2h(pruningPointStr)
+						if err := dbPut(txn, PrefixPruningPoints, Serialize(&pruningPointIndex), &hash, false); err != nil {
+							return err
 						}
-						block.Parents[i] = parents
+						PruningPointsStr[pruningPointStr] = pruningPointIndex
+						Log(LogInf, "New pruning point %d: %s", pruningPointIndex, pruningPointStr)
+					}
+					block.PruningPoint = pruningPointIndex
+
+					// Parents
+					parentFound := false
+					parentsStr := make(map[string]uint64, 0)
+					block.ParentLevels = make([][]uint64, 0)
+					block.Parents = make([]Hash, 0)
+					for _, rpcParentLevel := range rpcHeader.Parents {
+						rpcParent := rpcParentLevel.ParentHashes
+						parentLevels2 := make([]uint64, 0)
+						for _, rpcParent := range rpcParent {
+							parentIndex, ok := parentsStr[rpcParent]
+							if !ok {
+								parentHash := S2h(rpcParent)
+								block.Parents = append(block.Parents, parentHash)
+								if err := dbPut(txn, PrefixBlockChild, append(parentHash[:KeyLength], keyBlock[:]...), nil, false); err != nil {
+									return err
+								}
+								parentIndex = uint64(len(parentsStr))
+								parentsStr[rpcParent] = parentIndex
+								if rpcParent == rpcVData.SelectedParentHash {
+									block.SelectedParent = parentIndex
+									parentFound = true
+								}
+							}
+							parentLevels2 = append(parentLevels2, parentIndex)
+						}
+						block.ParentLevels = append(block.ParentLevels, parentLevels2)
+					}
+					if !parentFound {
+						Log(LogInf, "Selected parent not found (genesis?): %s", rpcVData.SelectedParentHash)
+						block.Parents = append(block.Parents, S2h(rpcVData.SelectedParentHash))
 					}
 
-					//Log(LogErr, "keyBlock full (%d): %v", len(block.Hash[:]), block.Hash[:])
-					//Log(LogErr, "keyBlock (%d): %v", len(keyBlock[:]), keyBlock[:])
 					if err := dbPut(txn, PrefixBlock, keyBlock[:], &block, false); err != nil {
 						return err
 					}
@@ -362,7 +355,7 @@ func insert() {
 								ScriptPublicKeyAddress: address,
 							}
 							if address != "" {
-								if err := dbPut(txn, PrefixAddress, Serialize(&AddressKey{address, keyBlock}), &[]byte{}, false); err != nil {
+								if err := dbPut(txn, PrefixAddress, Serialize(&AddressKey{address, keyBlock}), nil, false); err != nil {
 									return err
 								}
 							}
@@ -377,15 +370,17 @@ func insert() {
 							return err
 						}
 
-						if err := dbPut(txn, PrefixTransactionBlock, append(key[:], keyBlock[:]...), &[]byte{}, false); err != nil {
+						if err := dbPut(txn, PrefixTransactionBlock, append(key[:], keyBlock[:]...), nil, false); err != nil {
 							return err
 						}
 
 					}
+					LatestHashesTop = (LatestHashesTop + 1) % len(LatestHashes)
+					LatestHashes[LatestHashesTop] = &blockHash
 				}
 				bluestHash := writeElem.BluestHash
 				if bluestHash != nil {
-					Log(LogInf, "Writing bluest block: %s", hex.EncodeToString((*bluestHash)[:]))
+					Log(LogDbg, "Writing bluest block: %s", hex.EncodeToString((*bluestHash)[:]))
 					if err := dbPut(txn, PrefixBluestBlock, nil, bluestHash, true); err != nil {
 						return err
 					}
@@ -396,22 +391,22 @@ func insert() {
 				PanicIfErr(err)
 				break
 			}
-			info, err := dbEnv.Info()
+			info, err := DbEnv.Info()
 			PanicIfErr(err)
 			mapSize := info.MapSize
 			mapSizeBits := bits.Len64(uint64(mapSize)) - 3
 			newMapSize := mapSize&(0b111<<mapSizeBits) + 1<<mapSizeBits
-			Log(LogInf, "Map full, resizing: %d → %d", mapSize, newMapSize)
-			PanicIfErr(dbEnv.SetMapSize(newMapSize))
+			Log(LogInf, "LMDB map full, resizing: %d → %d", mapSize, newMapSize)
+			PanicIfErr(DbEnv.SetMapSize(newMapSize))
 		}
-		Log(LogInf, "Inserted blocks: %d", len(rpcBlocks))
+		Log(LogDbg, "Inserted blocks: %d", len(rpcBlocks))
 	}
 }
 
 func dbGet(prefix byte, key []byte, value interface{}) bool {
 	var binValue Bytes
-	err := dbEnv.View(func(txn *lmdb.Txn) (err error) {
-		binValue, err = txn.Get(db, append([]byte{prefix}, key...))
+	err := DbEnv.View(func(txn *lmdb.Txn) (err error) {
+		binValue, err = txn.Get(Db, append([]byte{prefix}, key...))
 		return err
 	})
 	if lmdb.IsNotFound(err) {
@@ -424,135 +419,22 @@ func dbGet(prefix byte, key []byte, value interface{}) bool {
 
 func dbPut(txn *lmdb.Txn, prefix byte, key []byte, value interface{}, overwrite bool) error {
 	binKey := append([]byte{prefix}, key...)
-	binValue := Serialize(value)
+	var binValue []byte
+	if value != nil {
+		binValue = Serialize(value)
+	}
 	stringKey := hex.EncodeToString(binKey)
 	Log(LogTrc, "Put: %s: %s", stringKey, hex.EncodeToString(binValue))
 	flags := uint(lmdb.NoOverwrite)
 	if overwrite {
 		flags = 0
 	}
-	err := txn.Put(db, binKey, binValue, flags)
+	err := txn.Put(Db, binKey, binValue, flags)
 	if lmdb.IsErrno(err, lmdb.KeyExist) {
-		Log(LogDbg, "dbPut key exist: %s", stringKey)
+		Log(LogTrc, "dbPut key exist: %s", stringKey)
 		err = nil
 	}
 	return err
-}
-
-func Serialize(value interface{}) []byte {
-	buff := bytes.Buffer{}
-	SerializeValue(true, &buff, reflect.ValueOf(value).Elem())
-	return buff.Bytes()
-}
-
-func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
-	value := metaValue.Interface()
-	switch metaValue.Kind() {
-	case reflect.Struct:
-		for i := 0; i < metaValue.NumField(); i++ {
-			metaField := metaValue.Field(i)
-			if _, isNonce := value.(UInt64Full); isNonce {
-				uintBytes := make([]byte, 8)
-				if isSer {
-					binary.LittleEndian.PutUint64(uintBytes, metaField.Interface().(uint64))
-					buffer.Write(uintBytes)
-				} else {
-					_, err := buffer.Read(uintBytes)
-					PanicIfErr(err)
-					metaField.SetUint(binary.LittleEndian.Uint64(uintBytes))
-				}
-			} else {
-				SerializeValue(isSer, buffer, metaField)
-			}
-		}
-	case reflect.Slice:
-		if isSer {
-			SerializeLen(buffer, metaValue)
-			SerializeArray(isSer, buffer, metaValue)
-		} else {
-			sliceLen := DeserializeLen(buffer)
-			metaSlice := reflect.MakeSlice(metaValue.Type(), sliceLen, sliceLen)
-			SerializeArray(false, buffer, metaSlice)
-			metaValue.Set(metaSlice)
-		}
-	case reflect.String:
-		if isSer {
-			SerializeLen(buffer, metaValue)
-			buffer.WriteString(value.(string))
-		} else {
-			buf := make([]byte, DeserializeLen(buffer))
-			_, err := buffer.Read(buf)
-			PanicIfErr(err)
-			metaValue.SetString(string(buf))
-		}
-	case reflect.Array:
-		SerializeArray(isSer, buffer, metaValue)
-	case reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if isSer {
-			var u64value uint64
-			switch value.(type) {
-			case uint16:
-				u64value = uint64(value.(uint16))
-			case uint32:
-				u64value = uint64(value.(uint32))
-			case uint64:
-				u64value = value.(uint64)
-			}
-			SerializeUint64(buffer, u64value)
-		} else {
-			DeserializeUint64(buffer, metaValue)
-		}
-	case reflect.Uint8:
-		if isSer {
-			buffer.WriteByte(value.(byte))
-		} else {
-			metaValue.SetUint(uint64(BufferReadByte(buffer)))
-		}
-	case reflect.Bool:
-		if isSer {
-			boolValue := byte(0)
-			if value.(bool) {
-				boolValue = 1
-			}
-			buffer.WriteByte(boolValue)
-		} else {
-			metaValue.SetBool(BufferReadByte(buffer) == 1)
-		}
-	}
-}
-
-func BufferReadByte(buffer *bytes.Buffer) byte {
-	val, err := buffer.ReadByte()
-	PanicIfErr(err)
-	return val
-}
-
-func SerializeLen(buffer *bytes.Buffer, metaValue reflect.Value) {
-	SerializeUint64(buffer, uint64(metaValue.Len()))
-}
-
-func DeserializeLen(buffer *bytes.Buffer) int {
-	sliceLen := uint64(0)
-	DeserializeUint64(buffer, reflect.ValueOf(&sliceLen).Elem())
-	return int(sliceLen)
-}
-
-func SerializeArray(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
-	for i := 0; i < metaValue.Len(); i++ {
-		SerializeValue(isSer, buffer, metaValue.Index(i))
-	}
-}
-
-func SerializeUint64(buffer *bytes.Buffer, value uint64) {
-	valueBytes := make([]byte, 8)
-	n := binary.PutUvarint(valueBytes, value)
-	buffer.Write(valueBytes[:n])
-}
-
-func DeserializeUint64(buffer *bytes.Buffer, metaValue reflect.Value) {
-	value, err := binary.ReadUvarint(buffer)
-	PanicIfErr(err)
-	metaValue.SetUint(value)
 }
 
 func S2h(s string) (h Hash) {
@@ -582,41 +464,13 @@ func H2s(h Hash) string {
 	return B2s(h[:])
 }
 
+func TimestampFormat(timestamp uint64) string {
+	t := int64(timestamp)
+	return time.Unix(t/1000, t%1000).UTC().Format("2006-01-02 15-04-05.000000000")
+}
+
 func PanicIfErr(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func Log(level byte, format string, args ...interface{}) {
-	if level <= byte(*logLevel) {
-		_, _ = fmt.Fprintf(os.Stderr, LevelStr[level]+" "+format+"\n", args...)
-	}
-}
-
-func isUpper(c byte) bool {
-	return c >= 'A' && c <= 'Z'
-}
-
-func ToTitle(s string) string {
-	r := make([]byte, 0, len(s)+2)
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if isUpper(c) && i > 0 && i+1 < len(s) && !(isUpper(s[i-1]) && isUpper(s[i+1])) {
-			r = append(r, ' ')
-		}
-		r = append(r, c)
-	}
-	return string(r)
-}
-
-func TrimZeroes(s string) string {
-	var i int
-	for i = 0; i < len(s); i++ {
-		if s[i] != '0' {
-			break
-		}
-	}
-	s = s[i:]
-	return s
 }
