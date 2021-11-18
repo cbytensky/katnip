@@ -18,10 +18,11 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 	case reflect.Struct:
 		for i := 0; i < metaValue.NumField(); i++ {
 			metaField := metaValue.Field(i)
-			if _, isNonce := value.(UInt64Full); isNonce {
+			fieldValue := metaField.Interface()
+			if fieldValueFull, isNonce := fieldValue.(UInt64Full); isNonce {
 				uintBytes := make([]byte, 8)
 				if isSer {
-					binary.LittleEndian.PutUint64(uintBytes, metaField.Interface().(uint64))
+					binary.LittleEndian.PutUint64(uintBytes, uint64(fieldValueFull))
 					buffer.Write(uintBytes)
 				} else {
 					_, err := buffer.Read(uintBytes)

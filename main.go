@@ -53,9 +53,10 @@ type (
 		Timestamp          uint64
 		Bits               uint32
 		Nonce              UInt64Full
-		DaaScore           uint64
+		DAAScore           uint64
 		BlueWork           Bytes
 		PruningPoint       uint64
+		TransactionIds     []Hash
 	}
 
 	Transaction struct {
@@ -262,10 +263,15 @@ func InsertingToDb() {
 						Timestamp:          uint64(rpcHeader.Timestamp),
 						Bits:               rpcHeader.Bits,
 						Nonce:              UInt64Full(rpcHeader.Nonce),
-						DaaScore:           rpcHeader.DAAScore,
+						DAAScore:           rpcHeader.DAAScore,
 						BlueWork:           blueWork,
+						TransactionIds:     make([]Hash, len(rpcBlock.Transactions)),
 					}
 					keyBlock := H2k(block.Hash)
+
+					for i, rpcTransaction := range rpcBlock.Transactions {
+						block.TransactionIds[i] = S2h(rpcTransaction.VerboseData.TransactionID)
+					}
 
 					// Pruning point
 					pruningPointStr := rpcHeader.PruningPoint
@@ -416,6 +422,34 @@ func dbGet(prefix byte, key []byte, value interface{}) bool {
 	SerializeValue(false, bytes.NewBuffer(binValue), reflect.ValueOf(value).Elem())
 	return true
 }
+
+//func dbGetRange(prefix byte, key []byte, value interface{}) bool {
+//	_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+//		cursor, err := txn.OpenCursor(Db)
+//		PanicIfErr(err)
+//		key, val, err := cursor.Get([]byte{PrefixPruningPoints}, nil, lmdb.SetRange)
+//		if lmdb.IsErrno(err, lmdb.NotFound) {
+//			return err
+//		}
+//		PanicIfErr(err)
+//		for {
+//			var pruningPointIndex uint64
+//			var pruningPoint Hash
+//			SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&pruningPointIndex).Elem())
+//			SerializeValue(false, bytes.NewBuffer(val), reflect.ValueOf(&pruningPoint).Elem())
+//			pruningPointStr := H2s(pruningPoint)
+//			PruningPointsStr[pruningPointStr] = pruningPointIndex
+//			Log(LogInf, "Stored pruning point %d: %s", pruningPointIndex, pruningPointStr)
+//			key, val, err = cursor.Get(nil, nil, lmdb.Next)
+//			if lmdb.IsErrno(err, lmdb.NotFound) {
+//				break
+//			}
+//			PanicIfErr(err)
+//		}
+//		return nil
+//	})
+//
+//}
 
 func dbPut(txn *lmdb.Txn, prefix byte, key []byte, value interface{}, overwrite bool) error {
 	binKey := append([]byte{prefix}, key...)

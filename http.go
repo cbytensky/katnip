@@ -75,35 +75,158 @@ func HttpServe() {
 			}
 			if name == "ParentLevels" {
 				valueStr = ""
-				if metaValue.Len() > 0{
-					for _, index := range value.([][]uint64)[0]{
+				numParents := 0
+				if metaValue.Len() > 0 {
+					parents := value.([][]uint64)[0]
+					numParents = len(parents)
+					for _, index := range parents {
 						HashStr := H2s(block.Parents[index])
-						valueStr += "<div><a href=\"/block/" + HashStr + "\">" + HashStr + "</a></div>"
+						Suffix := ""
+						b1, b2 := "", ""
+						if index == block.SelectedParent {
+							//Suffix = " (selected)"
+							b1, b2 = "<strong>", "</strong>"
+						}
+						valueStr += "<div><a href=\"/block/" + HashStr + "\">" + b1 + HashStr + b2 + "</a>" + Suffix + "</div>"
 					}
 				}
-				title = "Parents"
+				title = fmt.Sprintf("Parents (%d)", numParents)
 			}
-			if name == "Parents" {
+			if name == "Parents" || name == "SelectedParent" {
 				continue
 			}
-			if name == "BlueWork" {
-				valueStr = B2s(value.(Bytes))
-			}
-			if name == "PruningPoint"{
-				for k, v := range PruningPointsStr{
-					if v == block.PruningPoint{
+			if name == "PruningPoint" {
+				for k, v := range PruningPointsStr {
+					if v == block.PruningPoint {
 						valueStr = "<div><a href=\"/block/" + k + "\">" + k + "</a></div>"
 						break
 					}
 				}
+			}
+			if name == "Bits" {
+				valueStr = fmt.Sprintf("%b", value)
+			}
+			if name == "Nonce" || name == "BlueWork" {
+				valueStr = fmt.Sprintf("%x", value)
+				if valueStr[0] == '0' {
+					valueStr = valueStr[1:]
+				}
+			}
+			if name == "Timestamp" {
+				valueStr = TimestampFormat(value.(uint64))
+			}
+			if name == "TransactionIds" {
+				title = fmt.Sprintf("Transactions (%d)", len(block.TransactionIds))
+				valueStr = ""
+				for _, transactionId := range block.TransactionIds {
+					valueStr += fmt.Sprintf("<div><a href=\"/tx/%s\">%s</a></div>\n", B2s(transactionId[:KeyLength]), H2s(transactionId))
+				}
 
 			}
-
 			body += fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>\n", title, valueStr)
 		}
-		w.Write([]byte(Html(body +
-			"</tbody>\n" +
-			"</table>")))
+		body += "</tbody>\n" +
+			"</table>\n"
+		w.Write([]byte(Html(body)))
+
+	})
+	http.HandleFunc("/tx/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.Split(r.URL.Path, "/")
+		if len(path) < 3 {
+			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
+			return
+		}
+		hashSlice, err := hex.DecodeString(path[2])
+		if err != nil {
+			HttpError(errors.New(fmt.Sprintf("Bad hash: %v", path)), " decoding hash", w)
+			return
+		}
+		transaction := Transaction{}
+		if !dbGet(PrefixTransaction, hashSlice[0:KeyLength], &transaction) {
+			HttpError(errors.New("key not found: "+path[2]), "", w)
+			return
+		}
+
+		body := "<table>\n" +
+			"<tbody>\n"
+		metaStruct := reflect.ValueOf(transaction)
+		for i := 0; i < metaStruct.NumField(); i++ {
+			field := metaStruct.Type().Field(i)
+			metaValue := metaStruct.Field(i)
+			value := metaValue.Interface()
+			valueStr := fmt.Sprintf("%v", value)
+			name := field.Name
+			title := ToTitle(name)
+			if hash, isHash := value.(Hash); isHash {
+				valueStr = H2s(hash)
+			}
+			if bytes, isBytes := value.(Bytes); isBytes {
+				valueStr = B2s(bytes)
+			}
+			if name == "Inputs" || name == "Outputs" {
+				continue
+			}
+			body += fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>\n", title, valueStr)
+		}
+		body += "</tbody>\n" +
+			"</table>\n"
+		body += "<table>\n" +
+			"<caption>Inputs (" + fmt.Sprintf("%d", len(transaction.Inputs)) + ")</caption>\n" +
+			"<tbody>\n" +
+			"<tr>"
+		metaStruct = reflect.ValueOf(Input{})
+		for i := 0; i < metaStruct.NumField(); i++ {
+			body += fmt.Sprintf("<th>%s</th>", ToTitle(metaStruct.Type().Field(i).Name))
+		}
+		body += "</tr>\n"
+		for _, input := range transaction.Inputs {
+			body += "<tr>"
+			metaStruct := reflect.ValueOf(input)
+			for i := 0; i < metaStruct.NumField(); i++ {
+				field := metaStruct.Type().Field(i)
+				metaValue := metaStruct.Field(i)
+				value := metaValue.Interface()
+				valueStr := fmt.Sprintf("%v", value)
+				name := field.Name
+				_ = name
+				body += fmt.Sprintf("<td>%s</td>\n", valueStr)
+			}
+			body += "</tr>\n"
+		}
+		body += "</tbody>\n" +
+			"</table>\n"
+		body += "<table>\n" +
+			"<caption>Outputs (" + fmt.Sprintf("%d", len(transaction.Outputs)) + ")</caption>\n" +
+			"<tbody>\n" +
+			"<tr>"
+		metaStruct = reflect.ValueOf(Output{})
+		for i := 0; i < metaStruct.NumField(); i++ {
+			body += fmt.Sprintf("<th>%s</th>", ToTitle(metaStruct.Type().Field(i).Name))
+		}
+		body += "</tr>\n"
+		for _, input := range transaction.Outputs {
+			body += "<tr>"
+			metaStruct := reflect.ValueOf(input)
+			for i := 0; i < metaStruct.NumField(); i++ {
+				field := metaStruct.Type().Field(i)
+				metaValue := metaStruct.Field(i)
+				value := metaValue.Interface()
+				valueStr := fmt.Sprintf("%v", value)
+				name := field.Name
+				_ = name
+				if hash, isHash := value.(Hash); isHash {
+					valueStr = H2s(hash)
+				}
+				if bytes, isBytes := value.(Bytes); isBytes {
+					valueStr = B2s(bytes)
+				}
+				body += fmt.Sprintf("<td>%s</td>\n", valueStr)
+			}
+			body += "</tr>\n"
+		}
+		body += "</tbody>\n" +
+			"</table>\n"
+		w.Write([]byte(Html(body)))
 	})
 	Log(LogInf, "HTTP server started, port: %s", *HttpPort)
 	go http.ListenAndServe(":"+*HttpPort, nil)
