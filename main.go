@@ -49,7 +49,7 @@ type (
 		ParentLevels       [][]uint64
 		MerkleRoot         Hash
 		AcceptedMerkleRoot Hash
-		UtxoCommitment     Hash
+		UTXOCommitment     Hash
 		Timestamp          uint64
 		Bits               uint32
 		Nonce              UInt64Full
@@ -210,7 +210,7 @@ func main() {
 	if seconds != 0 {
 		bps = ibdCount / seconds
 	}
-	DbEnv.Sync(true)
+	PanicIfErr(DbEnv.Sync(true))
 	Log(LogInf, "IBD finished: %d blocks, %s, %d bps", ibdCount, duration, bps)
 
 	PanicIfErr(rpcClient.RegisterForBlockAddedNotifications(func(notification *appmessage.BlockAddedNotificationMessage) {
@@ -258,7 +258,7 @@ func InsertingToDb() {
 						Version:            rpcHeader.Version,
 						MerkleRoot:         S2h(rpcHeader.HashMerkleRoot),
 						AcceptedMerkleRoot: S2h(rpcHeader.AcceptedIDMerkleRoot),
-						UtxoCommitment:     S2h(rpcHeader.UTXOCommitment),
+						UTXOCommitment:     S2h(rpcHeader.UTXOCommitment),
 						Timestamp:          uint64(rpcHeader.Timestamp),
 						Bits:               rpcHeader.Bits,
 						Nonce:              UInt64Full(rpcHeader.Nonce),
@@ -380,7 +380,7 @@ func InsertingToDb() {
 				}
 				bluestHash := writeElem.BluestHash
 				if bluestHash != nil {
-					Log(LogDbg, "Writing bluest block: %s", hex.EncodeToString((*bluestHash)[:]))
+					Log(LogDbg, "Writing the bluest block: %s", hex.EncodeToString((*bluestHash)[:]))
 					if err := dbPut(txn, PrefixBluestBlock, nil, bluestHash, true); err != nil {
 						return err
 					}

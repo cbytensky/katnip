@@ -64,13 +64,41 @@ func HttpServe() {
 		metaStruct := reflect.ValueOf(block)
 		for i := 0; i < metaStruct.NumField(); i++ {
 			field := metaStruct.Type().Field(i)
-			value := metaStruct.Field(i).Interface()
+			metaValue := metaStruct.Field(i)
+			value := metaValue.Interface()
 			valueStr := fmt.Sprintf("%v", value)
-			if hash, isHash := value.(Hash); isHash {
-				valueStr = H2s(hash)
-			}
 			name := field.Name
 			title := ToTitle(name)
+			if hash, isHash := value.(Hash); isHash {
+				valueStr = H2s(hash)
+				//valueStr = "<a href=\"/block/" + valueStr + "\">" + valueStr + "</a>"
+			}
+			if name == "ParentLevels" {
+				valueStr = ""
+				if metaValue.Len() > 0{
+					for _, index := range value.([][]uint64)[0]{
+						HashStr := H2s(block.Parents[index])
+						valueStr += "<div><a href=\"/block/" + HashStr + "\">" + HashStr + "</a></div>"
+					}
+				}
+				title = "Parents"
+			}
+			if name == "Parents" {
+				continue
+			}
+			if name == "BlueWork" {
+				valueStr = B2s(value.(Bytes))
+			}
+			if name == "PruningPoint"{
+				for k, v := range PruningPointsStr{
+					if v == block.PruningPoint{
+						valueStr = "<div><a href=\"/block/" + k + "\">" + k + "</a></div>"
+						break
+					}
+				}
+
+			}
+
 			body += fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>\n", title, valueStr)
 		}
 		w.Write([]byte(Html(body +
