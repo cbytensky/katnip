@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"reflect"
 	"strings"
@@ -104,7 +105,7 @@ func HttpServe() {
 				}
 			}
 			if name == "Bits" {
-				valueStr = fmt.Sprintf("%b", value)
+				valueStr = fmt.Sprintf("%x, %x", value,difficulty.CompactToBig(value.(uint32)))
 			}
 			if name == "Nonce" || name == "BlueWork" {
 				valueStr = fmt.Sprintf("%x", value)
