@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
 	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"reflect"
@@ -21,6 +22,7 @@ func AddFlagHttp() {
 
 func HttpServe() {
 	http.Handle("/style.css", http.FileServer(http.Dir(".")))
+	http.Handle("/phoenician-kaph.svg", http.FileServer(http.Dir(".")))
 	http.HandleFunc("/?s=", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(Html("<p>1111111111111</p>")))
 	})
@@ -317,9 +319,13 @@ func HttpServe() {
 			for i := 0; i < metaStruct.NumField(); i++ {
 				field := metaStruct.Type().Field(i)
 				metaValue := metaStruct.Field(i)
+				name := field.Name
 				value := metaValue.Interface()
 				valueStr := fmt.Sprintf("%v", value)
-				name := field.Name
+				if name == "Amount"{
+					valueStr = fmt.Sprintf("%f", float64(value.(uint64))/constants.SompiPerKaspa)
+
+				}
 				_ = name
 				if hash, isHash := value.(Hash); isHash {
 					valueStr = H2s(hash)
@@ -353,6 +359,7 @@ func Html(body string) string {
 		"<head>\n" +
 		"<meta charset=\"UTF-8\"/>\n" +
 		"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
+		"<link rel=\"icon\" href=\"/phoenician-kaph.svg\"/>" +
 		"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
 		"<title>Katnip</title>\n" +
 		"</head>\n" +
