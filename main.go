@@ -86,6 +86,11 @@ type (
 		ScriptPublicKeyAddress string
 	}
 
+	TransactionBlock struct {
+		TransactionKey Key
+		BlockKey       Key
+	}
+
 	AddressKey struct {
 		Address  string
 		BlockKey Key
@@ -376,7 +381,7 @@ func InsertingToDb() {
 							return err
 						}
 
-						if err := dbPut(txn, PrefixTransactionBlock, append(key[:], keyBlock[:]...), nil, false); err != nil {
+						if err := dbPut(txn, PrefixTransactionBlock, Serialize(&TransactionBlock{key, keyBlock}), nil, false); err != nil {
 							return err
 						}
 

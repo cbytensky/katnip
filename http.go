@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"reflect"
@@ -105,7 +107,7 @@ func HttpServe() {
 				}
 			}
 			if name == "Bits" {
-				valueStr = fmt.Sprintf("%x, %x", value,difficulty.CompactToBig(value.(uint32)))
+				valueStr = fmt.Sprintf("%x, %x", value, difficulty.CompactToBig(value.(uint32)))
 			}
 			if name == "Nonce" || name == "BlueWork" {
 				valueStr = fmt.Sprintf("%x", value)
@@ -117,6 +119,9 @@ func HttpServe() {
 				valueStr = TimestampFormat(value.(uint64))
 			}
 			if name == "TransactionIds" {
+				if block.IsHeaderOnly {
+					continue
+				}
 				title = fmt.Sprintf("Transactions (%d)", len(block.TransactionIds))
 				valueStr = ""
 				for _, transactionId := range block.TransactionIds {
@@ -169,7 +174,48 @@ func HttpServe() {
 			}
 			body += fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>\n", title, valueStr)
 		}
-		body += "</tbody>\n" +
+		blockKeys := make([]Key, 0)
+		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+			cursor, err := txn.OpenCursor(Db)
+			PanicIfErr(err)
+			keyPrefix := append([]byte{PrefixTransactionBlock}, transaction.Id[:KeyLength]...)
+			key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+			if lmdb.IsErrno(err, lmdb.NotFound) {
+				return err
+			}
+			PanicIfErr(err)
+			for {
+				var transactionBlock TransactionBlock
+				SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&transactionBlock).Elem())
+				equal := true
+				for i, v := range keyPrefix {
+					if key[i] != v {
+						equal = false
+						break
+					}
+				}
+				if !equal {
+					break
+				}
+				Log(LogErr, "%v", key)
+				blockKeys = append(blockKeys, transactionBlock.BlockKey)
+				key, val, err = cursor.Get(nil, nil, lmdb.Next)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					break
+				}
+				PanicIfErr(err)
+			}
+			_ = val
+			return nil
+		})
+		body += "<tr><th>Blocks (" + fmt.Sprintf("%d", len(blockKeys)) + ")</th><td>"
+		for _, blockKey := range blockKeys {
+			var block Block
+			dbGet(PrefixBlock, blockKey[:], &block)
+			body += "<div><a href=\"/block/" + B2s(blockKey[:]) + "\">" + H2s(block.Hash) + "</a></div>\n"
+		}
+
+		body += "</tr>\n" +
 			"</table>\n"
 		body += "<table>\n" +
 			"<caption>Inputs (" + fmt.Sprintf("%d", len(transaction.Inputs)) + ")</caption>\n" +
