@@ -1,8 +1,8 @@
 module github.com/cbitensky/katnip
 
-go 1.16
+go 1.15
 
-replace github.com/kaspanet/kaspad => ../../kaspanet/kaspad
+//replace github.com/kaspanet/kaspad => ../../kaspanet/kaspad
 
 require (
 	github.com/bmatsuo/lmdb-go v1.8.0

@@ -21,11 +21,17 @@ func AddFlagHttp() {
 
 func HttpServe() {
 	http.Handle("/style.css", http.FileServer(http.Dir(".")))
+	http.HandleFunc("/?s=", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(Html("<p>1111111111111</p>")))
+	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body := "<table>\n" +
+		body := "<form action=\"/\">\n" +
+			"<input name=\"s\"/>\n" +
+			"</form>\n"
+		body = "<table>\n" +
 			"<caption>Latest blocks</caption>\n" +
 			"<thead class=\"thead\">\n" +
-			"<tr><th>Timestamp</th><th>Hash</th><th>Blue score</th></tr>\n" +
+			"<tr><th>Timestamp</th><th>Hash</th><th>DAA score</th></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n"
 		latestNum := len(LatestHashes)
@@ -35,7 +41,7 @@ func HttpServe() {
 			if hash != nil && dbGet(PrefixBlock, (*hash)[:KeyLength], &block) {
 				hashStr := H2s(*hash)
 				body += "<a class=\"tr\" href=\"/block/" + hashStr[:KeyLength*2] + "\"><td>" + TimestampFormat(block.Timestamp) +
-					"</td><td>" + hashStr + "</td><td>" + fmt.Sprintf("%d", block.BlueScore) +
+					"</td><td>" + hashStr + "</td><td>" + fmt.Sprintf("%d", block.DAAScore) +
 					"</td></a>\n"
 			}
 		}
@@ -44,8 +50,62 @@ func HttpServe() {
 			"</tbody>\n" +
 			"</table>\n")))
 	})
+	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.Split(r.URL.Path, "/")
+		if len(path) < 3 {
+			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
+			return
+		}
+		addr := path[2]
+		body := "<table>\n" +
+			"<caption>Transactions of address " + addr + "</caption>\n" +
+			"<tbody>\n"
+		txIds := make([]Key, 0)
+		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+			cursor, err := txn.OpenCursor(Db)
+			PanicIfErr(err)
+			keyPrefix := append([]byte{PrefixAddress}, addr...)
+			key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+			if lmdb.IsErrno(err, lmdb.NotFound) {
+				return err
+			}
+			PanicIfErr(err)
+			for {
+				equal := true
+				for i, v := range keyPrefix {
+					if key[i] != v {
+						equal = false
+						break
+					}
+				}
+				if !equal {
+					break
+				}
+				var addressKey AddressTransaction
+				SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&addressKey).Elem())
+				Log(LogErr, "%v", key)
+				txIds = append(txIds, addressKey.TransactionId)
+				key, val, err = cursor.Get(nil, nil, lmdb.Next)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					break
+				}
+				PanicIfErr(err)
+			}
+			_ = val
+			return nil
+		})
+		for _, txId := range txIds {
+			var tx Transaction
+			dbGet(PrefixTransaction, txId[:], &tx)
+			body += "<tr><td><a href=\"/tx/" + B2s(txId[:]) + "\">" + H2s(tx.Id) + "</a></td></tr>\n"
+		}
+
+		w.Header().Set("Content-Type", "application/xhtml+xml")
+		w.Write([]byte(Html(body +
+			"</tbody>\n" +
+			"</table>\n")))
+	})
 	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogErr, "Path: %v", r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)

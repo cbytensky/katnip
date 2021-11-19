@@ -91,9 +91,9 @@ type (
 		BlockKey       Key
 	}
 
-	AddressKey struct {
-		Address  string
-		BlockKey Key
+	AddressTransaction struct {
+		Address       string
+		TransactionId Key
 	}
 )
 
@@ -343,6 +343,7 @@ func InsertingToDb() {
 							Inputs:   make([]Input, len(rpcInputs)),
 							Outputs:  make([]Output, len(rpcOutputs)),
 						}
+						key := H2k(transaction.Id)
 
 						for i, rpcInput := range rpcInputs {
 							rpcPrevious := rpcInput.PreviousOutpoint
@@ -366,13 +367,12 @@ func InsertingToDb() {
 								ScriptPublicKeyAddress: address,
 							}
 							if address != "" {
-								if err := dbPut(txn, PrefixAddress, Serialize(&AddressKey{address, keyBlock}), nil, false); err != nil {
+								if err := dbPut(txn, PrefixAddress, Serialize(&AddressTransaction{address, key}), nil, false); err != nil {
 									return err
 								}
 							}
 						}
 
-						key := H2k(transaction.Id)
 						if err := dbPut(txn, PrefixTransaction, key[:], &transaction, false); err != nil {
 							return err
 						}
