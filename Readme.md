@@ -19,7 +19,7 @@ go build .
 ./katnip
 ```
 
-By default it connects to Kaspad server at `0.0.0.0:16110`, creates database file `~/katnip.mdb` and runs HTTP server on port `80`. Than you can open http://0.0.0.0 by browser.
+By default it connects to Kaspad server at `0.0.0.0:16110`, creates database file `~/katnip.mdb` and runs HTTP server on port `80`. Than you can open http://127.0.0.1 by browser.
 
 ## CSS styling
 
