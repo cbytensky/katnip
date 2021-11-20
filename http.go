@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
-	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
 	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"reflect"
@@ -60,8 +59,8 @@ func HttpServe() {
 				"td:nth-of-type(5) { width: 1.5em }\n"+
 				"td:nth-of-type(3) { font-family: monospace,monospace; font-size: 1em }\n"+
 				"</style>", body+
-			"</tbody>\n"+
-			"</table>\n")))
+				"</tbody>\n"+
+				"</table>\n")))
 	})
 	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.Split(r.URL.Path, "/")
@@ -71,13 +70,12 @@ func HttpServe() {
 		}
 		addr := path[2]
 		body := "<table>\n" +
-			"<caption>Transactions of address " + addr + "</caption>\n" +
-			"<tbody>\n"
+			"<caption>Outputs of address " + addr + "</caption>\n"
 		txIds := make([]Key, 0)
 		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
 			cursor, err := txn.OpenCursor(Db)
 			PanicIfErr(err)
-			keyPrefix := append([]byte{PrefixAddress}, addr...)
+			keyPrefix := append([]byte{PrefixAddress}, Serialize(&addr)...)
 			key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
 			if lmdb.IsErrno(err, lmdb.NotFound) {
 				return err
@@ -107,15 +105,29 @@ func HttpServe() {
 			_ = val
 			return nil
 		})
+		tds := ""
+		totalAmount := uint64(0)
 		for _, txId := range txIds {
 			var tx Transaction
 			dbGet(PrefixTransaction, txId[:], &tx)
 			idStr := H2s(tx.Id)
-			body += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td></tr>\n"
+			amount := uint64(0)
+			for _, output := range tx.Outputs {
+				if output.ScriptPublicKeyAddress == addr {
+					amount += output.Amount
+				}
+			}
+			totalAmount += amount
+			tds += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td><td>" + FormatKaspa(amount) + "</td></tr>\n"
 		}
+		body += "<thead>\n" +
+			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount</th></tr>\n" +
+			"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
+			"</thead>\n" +
+			"<tbody>\n" + tds
 
 		w.Header().Set("Content-Type", "application/xhtml+xml")
-		w.Write([]byte(Html("", body+
+		w.Write([]byte(Html("<style>\ntd{ text-align: right }</style>\n", body+
 			"</tbody>\n"+
 			"</table>\n")))
 	})
@@ -347,10 +359,11 @@ func HttpServe() {
 				value := metaValue.Interface()
 				valueStr := fmt.Sprintf("%v", value)
 				if name == "Amount" {
-					valueStr = fmt.Sprintf("%f", float64(value.(uint64))/constants.SompiPerKaspa)
-
+					valueStr = FormatKaspa(value.(uint64))
 				}
-				_ = name
+				if name == "ScriptPublicKeyAddress" {
+					valueStr = "<a href=\"/addr/"+valueStr+"\">" + valueStr + "</a>"
+				}
 				if hash, isHash := value.(Hash); isHash {
 					valueStr = H2s(hash)
 				}

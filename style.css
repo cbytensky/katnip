@@ -55,4 +55,5 @@ td { font-family: monospace, monospace; font-size: 1em }
 
 table { margin: var(--margin) auto; padding: 0 }
 th { color: var(--color-aux); background: var(--color-back3) }
-caption { color: var(--color-title); text-align: left; padding-bottom: .1rem }
+caption { color: var(--color-title); padding-bottom: .5rem }
+.r { text-align: right }

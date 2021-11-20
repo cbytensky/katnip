@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/app/appmessage"
+	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
 	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 	"math/bits"
 	"os"
@@ -506,6 +508,23 @@ func H2s(h Hash) string {
 func TimestampFormat(timestamp uint64) string {
 	t := int64(timestamp)
 	return time.Unix(t/1000, t%1000).UTC().Format("2006-01-02 15-04-05.000000000")
+}
+
+func FormatKaspa(sompi uint64) string {
+	result := fmt.Sprintf("%.8f", float64(sompi)/constants.SompiPerKaspa)
+	point := strings.Index(result, ".")
+	result2 := result[point:]
+	i := point - 3
+	for ; i > 0; i -= 3 {
+		result2 = ","+result[i:i+3]+result2
+	}
+	result2 = result[:i+3]+result2
+	//Log(LogErr, "%s → %s" + result, result2)
+	return result2
+}
+
+func FormatNumber(num interface{}) string {
+	return fmt.Sprintf("%d", num)
 }
 
 func PanicIfErr(err error) {
