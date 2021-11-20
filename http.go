@@ -24,16 +24,16 @@ func HttpServe() {
 	http.Handle("/style.css", http.FileServer(http.Dir(".")))
 	http.Handle("/phoenician-kaph.svg", http.FileServer(http.Dir(".")))
 	http.HandleFunc("/?s=", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(Html("<p>1111111111111</p>")))
+		w.Write([]byte(Html("", "<p>1111111111111</p>")))
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		body := "<form action=\"/\">\n" +
 			"<input name=\"s\"/>\n" +
 			"</form>\n"
-		body = "<table>\n" +
+		body = "<table class=\"sans\">\n" +
 			"<caption>Latest blocks</caption>\n" +
 			"<thead class=\"thead\">\n" +
-			"<tr><th>Timestamp</th><th>Hash</th><th>DAA score</th></tr>\n" +
+			"<tr><th>DAA score</th><th>Timestamp, UTC</th><th>Hash</th><th><abbr title=\"Number of parents\">#P</abbr></th><th><abbr title=\"Number of transactions\">#Tx</abbr></th><th>Blue score</th></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n"
 		latestNum := len(LatestHashes)
@@ -42,14 +42,25 @@ func HttpServe() {
 			hash := LatestHashes[(LatestHashesTop+latestNum-i)%latestNum]
 			if hash != nil && dbGet(PrefixBlock, (*hash)[:KeyLength], &block) {
 				hashStr := H2s(*hash)
-				body += "<a class=\"tr\" href=\"/block/" + hashStr[:KeyLength*2] + "\"><td>" + TimestampFormat(block.Timestamp) +
-					"</td><td>" + hashStr + "</td><td>" + fmt.Sprintf("%d", block.DAAScore) +
-					"</td></a>\n"
+				body += "<tr>" +
+					"<td>" + fmt.Sprintf("%d", block.DAAScore) + "</td>" +
+					"<td>" + TimestampFormat(block.Timestamp) + "</td>" +
+					"<td><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></td>" +
+					"<td>" + fmt.Sprintf("%d", len(block.ParentLevels[0])) + "</td>" +
+					"<td>" + fmt.Sprintf("%d", len(block.TransactionIds)) + "</td>" +
+					"<td>" + fmt.Sprintf("%d", block.BlueScore) + "</td>" +
+					"</tr>\n"
 			}
 		}
 		w.Header().Set("Content-Type", "application/xhtml+xml")
-		w.Write([]byte(Html(body +
-			"</tbody>\n" +
+		w.Write([]byte(Html(
+			"<style>\n"+
+				"td:nth-of-type(1), td:nth-of-type(4), td:nth-of-type(5), td:nth-of-type(6) { text-align: right }\n"+
+				"td:nth-of-type(4) { width: 1em }\n"+
+				"td:nth-of-type(5) { width: 1.5em }\n"+
+				"td:nth-of-type(3) { font-family: monospace,monospace; font-size: 1em }\n"+
+				"</style>", body+
+			"</tbody>\n"+
 			"</table>\n")))
 	})
 	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
@@ -99,12 +110,13 @@ func HttpServe() {
 		for _, txId := range txIds {
 			var tx Transaction
 			dbGet(PrefixTransaction, txId[:], &tx)
-			body += "<tr><td><a href=\"/tx/" + B2s(txId[:]) + "\">" + H2s(tx.Id) + "</a></td></tr>\n"
+			idStr := H2s(tx.Id)
+			body += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td></tr>\n"
 		}
 
 		w.Header().Set("Content-Type", "application/xhtml+xml")
-		w.Write([]byte(Html(body +
-			"</tbody>\n" +
+		w.Write([]byte(Html("", body+
+			"</tbody>\n"+
 			"</table>\n")))
 	})
 	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +199,8 @@ func HttpServe() {
 				title = fmt.Sprintf("Transactions (%d)", len(block.TransactionIds))
 				valueStr = ""
 				for _, transactionId := range block.TransactionIds {
-					valueStr += fmt.Sprintf("<div><a href=\"/tx/%s\">%s</a></div>\n", B2s(transactionId[:KeyLength]), H2s(transactionId))
+					idStr := H2s(transactionId)
+					valueStr += fmt.Sprintf("<div><a href=\"/tx/%s\">%s</a></div>\n", idStr, idStr)
 				}
 
 			}
@@ -195,7 +208,7 @@ func HttpServe() {
 		}
 		body += "</tbody>\n" +
 			"</table>\n"
-		w.Write([]byte(Html(body)))
+		w.Write([]byte(Html("", body)))
 
 	})
 	http.HandleFunc("/tx/", func(w http.ResponseWriter, r *http.Request) {
@@ -274,20 +287,23 @@ func HttpServe() {
 		for _, blockKey := range blockKeys {
 			var block Block
 			dbGet(PrefixBlock, blockKey[:], &block)
-			body += "<div><a href=\"/block/" + B2s(blockKey[:]) + "\">" + H2s(block.Hash) + "</a></div>\n"
+			hashStr := H2s(block.Hash)
+			body += "<div><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></div>\n"
 		}
 
 		body += "</tr>\n" +
 			"</table>\n"
 		body += "<table>\n" +
 			"<caption>Inputs (" + fmt.Sprintf("%d", len(transaction.Inputs)) + ")</caption>\n" +
-			"<tbody>\n" +
+			"<thead>\n" +
 			"<tr>"
 		metaStruct = reflect.ValueOf(Input{})
 		for i := 0; i < metaStruct.NumField(); i++ {
 			body += fmt.Sprintf("<th>%s</th>", ToTitle(metaStruct.Type().Field(i).Name))
 		}
-		body += "</tr>\n"
+		body += "</tr>\n" +
+			"</thead>\n" +
+			"<tbody>"
 		for _, input := range transaction.Inputs {
 			body += "<tr>"
 			metaStruct := reflect.ValueOf(input)
@@ -298,6 +314,12 @@ func HttpServe() {
 				valueStr := fmt.Sprintf("%v", value)
 				name := field.Name
 				_ = name
+				if hash, isHash := value.(Hash); isHash {
+					valueStr = H2s(hash)
+				}
+				if bytes, isBytes := value.(Bytes); isBytes {
+					valueStr = B2s(bytes)
+				}
 				body += fmt.Sprintf("<td>%s</td>\n", valueStr)
 			}
 			body += "</tr>\n"
@@ -306,13 +328,15 @@ func HttpServe() {
 			"</table>\n"
 		body += "<table>\n" +
 			"<caption>Outputs (" + fmt.Sprintf("%d", len(transaction.Outputs)) + ")</caption>\n" +
-			"<tbody>\n" +
+			"<thead>\n" +
 			"<tr>"
 		metaStruct = reflect.ValueOf(Output{})
 		for i := 0; i < metaStruct.NumField(); i++ {
 			body += fmt.Sprintf("<th>%s</th>", ToTitle(metaStruct.Type().Field(i).Name))
 		}
-		body += "</tr>\n"
+		body += "</tr>\n" +
+			"</thead>\n" +
+			"<tbody>"
 		for _, input := range transaction.Outputs {
 			body += "<tr>"
 			metaStruct := reflect.ValueOf(input)
@@ -322,7 +346,7 @@ func HttpServe() {
 				name := field.Name
 				value := metaValue.Interface()
 				valueStr := fmt.Sprintf("%v", value)
-				if name == "Amount"{
+				if name == "Amount" {
 					valueStr = fmt.Sprintf("%f", float64(value.(uint64))/constants.SompiPerKaspa)
 
 				}
@@ -339,7 +363,7 @@ func HttpServe() {
 		}
 		body += "</tbody>\n" +
 			"</table>\n"
-		w.Write([]byte(Html(body)))
+		w.Write([]byte(Html("", body)))
 	})
 	Log(LogInf, "HTTP server started, port: %s", *HttpPort)
 	go http.ListenAndServe(":"+*HttpPort, nil)
@@ -347,13 +371,13 @@ func HttpServe() {
 
 func HttpError(err error, title string, w http.ResponseWriter) bool {
 	w.WriteHeader(http.StatusNotFound)
-	w.Write([]byte(Html(
-		"<h1>Error" + title + "</h1>\n" +
-			"<p>" + fmt.Sprintf("%v", err) + "</p>\n")))
+	w.Write([]byte(Html("",
+		"<h1>Error"+title+"</h1>\n"+
+			"<p>"+fmt.Sprintf("%v", err)+"</p>\n")))
 	return true
 }
 
-func Html(body string) string {
+func Html(head, body string) string {
 	return "<!DOCTYPE html>\n" +
 		"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\">\n" +
 		"<head>\n" +
@@ -361,6 +385,7 @@ func Html(body string) string {
 		"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
 		"<link rel=\"icon\" href=\"/phoenician-kaph.svg\"/>" +
 		"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
+		head +
 		"<title>Katnip</title>\n" +
 		"</head>\n" +
 		"<body>\n" +

@@ -1,5 +1,5 @@
-@media not all and (max-width: 30rem) { :root { --margin: 1rem;  --text-align: justify; --text-indent: 2rem } }
-@media (max-width: 30rem)             { :root { --margin: .4rem; --text-align: unset;   --text-indent: 1rem } }
+@media not all and (max-width: 30rem) { :root { --margin: 1rem } }
+@media (max-width: 30rem)             { :root { --margin: .4rem } }
 @media print { :root { --margin: 0 } }
 
 :root {
@@ -15,7 +15,7 @@
 	--hue-caption: calc( 2turn/12);
 	--hue-a:       calc( 8turn/12);
 	--hue-visited: calc(10turn/12);
-	--percent-aux: 50%;
+	--percent-aux: 30%;
 	--lum-fore: calc(var(--back) var(--op) (1 - var(--dimness)) * 100%);
 	--lum-aux: calc(var(--back) var(--op) (100% - var(--percent-aux)));
 	--saturation-aux: 25%;
@@ -25,29 +25,34 @@
 	--color-caption:     hsl(var(--hue-caption), 75%, var(--lum-fore));
 	--color-caption-aux: hsl(var(--hue-caption), var(--saturation-aux), var(--lum-aux));
 
-	--color-back:   hsl(0, 0%, calc(var(--back) var(--op) 2/16*100%));
-	--color-sup:    hsl(0, 0%, calc(var(--back) var(--op) 4/16*100%));
+	--color-back:   hsl(0, 0%, calc(var(--back) var(--op)  4/32*100%));
+	--color-back1:  hsl(0, 0%, calc(var(--back) var(--op)  5/32*100%));
+	--color-back2:  hsl(0, 0%, calc(var(--back) var(--op)  6/32*100%));
+	--color-back3:  hsl(0, 0%, calc(var(--back) var(--op)  7/32*100%));
+	--color-back4:  hsl(0, 0%, calc(var(--back) var(--op)  8/32*100%));
+	--color-back5:  hsl(0, 0%, calc(var(--back) var(--op)  9/32*100%));
+	--color-back6:  hsl(0, 0%, calc(var(--back) var(--op) 10/32*100%));
+	--color-back7:  hsl(0, 0%, calc(var(--back) var(--op) 11/32*100%));
 	--color-fore:   hsl(0, 0%, var(--lum-fore));
 	--color-bright: hsl(0, 0%, calc(var(--back) var(--op) 200%));
 }
 
 body { font-family: sans-serif; padding: 0 var(--margin); background-color: var(--color-back); color: var(--color-fore) }
+/*@media (prefers-color-scheme: light) { body {background-color: initial } }*/
 
-* { border-width: 1px; border-color: hsl(0, 0%, calc(var(--back) var(--op) 30%)) }
+* { border-width: 1px; border-color: var(--color-back7) }
 
-a { text-decoration: none; color: hsl(var(--hue-a), 100%, var(--lum-fore)) }
+a, abbr { text-decoration: none }
+a { color: hsl(var(--hue-a), 100%, var(--lum-fore)) }
 a:visited { color: hsl(var(--hue-visited), 100%, var(--lum-fore)) }
 
-table { border-collapse: collapse; max-width: 100% }
-th { font-weight: normal; font-size: small }
+table { border-collapse: collapse; max-width: 100%; background: var(--color-back1) }
+th { font-weight: normal; font-size: smaller }
 tbody > tr > th { text-align: right }
-td, th { border-style: solid; padding: .2em .3em }
-tbody > tr > th { vertical-align: top }
-td { font-family: monospace }
+td, th { border-style: solid; padding: .1rem .3rem }
+td { font-family: monospace, monospace; font-size: 1em }
+.sans td { font-family: inherit }
 
 table { margin: var(--margin) auto; padding: 0 }
-th { color: var(--color-caption) }
-.tr {display: table-row }
-.table {display: table }
-.thead {display: table-header-group }
-.tbody {display: table-row-group }
+th { color: var(--color-aux); background: var(--color-back3) }
+caption { color: var(--color-title); text-align: left; padding-bottom: .1rem }

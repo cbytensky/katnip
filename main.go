@@ -112,7 +112,7 @@ var WriteChan = make(chan WriteChanElem, 10)
 var MaxBlueWorkStr string
 var BluestHashStr string
 var PruningPointsStr = make(map[string]uint64, 1)
-var LatestHashes [10]*Hash
+var LatestHashes [20]*Hash
 var LatestHashesTop int
 
 func main() {
