@@ -379,7 +379,7 @@ func InsertingToDb() {
 							return err
 						}
 
-						if err := dbPut(txn, PrefixTransactionHash, transaction.Id[:KeyLength], &key, false); err != nil {
+						if err := dbPut(txn, PrefixTransactionHash, transaction.Hash[:KeyLength], &key, false); err != nil {
 							return err
 						}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 )
@@ -22,14 +23,57 @@ func AddFlagHttp() {
 func HttpServe() {
 	http.Handle("/style.css", http.FileServer(http.Dir(".")))
 	http.Handle("/phoenician-kaph.svg", http.FileServer(http.Dir(".")))
-	http.HandleFunc("/?s=", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(Html("", "<p>1111111111111</p>")))
-	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body := "<form action=\"/\">\n" +
-			"<input name=\"s\"/>\n" +
+		NotFound := ""
+		if keys, ok := r.URL.Query()["s"]; ok {
+			searchStr := keys[0]
+			if hash, err := hex.DecodeString(searchStr); err == nil {
+				var block Block
+				if dbGet(PrefixBlock, hash[:KeyLength], &block) {
+					http.Redirect(w, r, "/block/"+searchStr, 301)
+				}
+				var tx Transaction
+				if dbGet(PrefixTransaction, hash[:KeyLength], &tx) {
+					http.Redirect(w, r, "/tx/"+searchStr, 301)
+				}
+				var txKey Key
+				if dbGet(PrefixTransactionHash, hash[:KeyLength], &txKey) {
+					http.Redirect(w, r, "/tx/"+B2s(txKey[:]), 301)
+				}
+				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
+			}
+			searchStr = url.PathEscape(searchStr)
+			err := DbEnv.View(func(txn *lmdb.Txn) (err error) {
+				cursor, err := txn.OpenCursor(Db)
+				PanicIfErr(err)
+				keyPrefix := append([]byte{PrefixAddress}, Serialize(&searchStr)...)
+				key, _, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					return err
+				}
+				PanicIfErr(err)
+				equal := true
+				for i, v := range keyPrefix {
+					if key[i] != v {
+						equal = false
+						break
+					}
+				}
+				if !equal {
+					return errors.New("asdf")
+				}
+				return nil
+			})
+			if err != nil{
+				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
+			}else {
+				http.Redirect(w, r, "/addr/"+searchStr, 301)
+			}
+		}
+		body := NotFound + "<form action=\"/\">\n" +
+			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address\"/>\n" +
 			"</form>\n"
-		body = "<table class=\"sans\">\n" +
+		body += "<table class=\"sans\">\n" +
 			"<caption>Latest blocks</caption>\n" +
 			"<thead class=\"thead\">\n" +
 			"<tr><th>DAA score</th><th>Timestamp, UTC</th><th>Hash</th><th><abbr title=\"Number of parents\">#P</abbr></th><th><abbr title=\"Number of transactions\">#Tx</abbr></th><th>Blue score</th></tr>\n" +
@@ -94,7 +138,6 @@ func HttpServe() {
 				}
 				var addressKey AddressTransaction
 				SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&addressKey).Elem())
-				Log(LogErr, "%v", key)
 				txIds = append(txIds, addressKey.TransactionId)
 				key, val, err = cursor.Get(nil, nil, lmdb.Next)
 				if lmdb.IsErrno(err, lmdb.NotFound) {
@@ -121,8 +164,8 @@ func HttpServe() {
 			tds += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td><td>" + FormatKaspa(amount) + "</td></tr>\n"
 		}
 		body += "<thead>\n" +
-			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount</th></tr>\n" +
-			"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
+			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount<br/>(" + FormatKaspa(totalAmount) + ")</th></tr>\n" +
+			//"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n" + tds
 
@@ -284,7 +327,6 @@ func HttpServe() {
 				if !equal {
 					break
 				}
-				Log(LogErr, "%v", key)
 				blockKeys = append(blockKeys, transactionBlock.BlockKey)
 				key, val, err = cursor.Get(nil, nil, lmdb.Next)
 				if lmdb.IsErrno(err, lmdb.NotFound) {
@@ -362,7 +404,7 @@ func HttpServe() {
 					valueStr = FormatKaspa(value.(uint64))
 				}
 				if name == "ScriptPublicKeyAddress" {
-					valueStr = "<a href=\"/addr/"+valueStr+"\">" + valueStr + "</a>"
+					valueStr = "<a href=\"/addr/" + valueStr + "\">" + valueStr + "</a>"
 				}
 				if hash, isHash := value.(Hash); isHash {
 					valueStr = H2s(hash)

@@ -25,6 +25,9 @@
 	--color-caption:     hsl(var(--hue-caption), 75%, var(--lum-fore));
 	--color-caption-aux: hsl(var(--hue-caption), var(--saturation-aux), var(--lum-aux));
 
+    --color-back-2: hsl(0, 0%, calc(var(--back) var(--op)  1/32*100%));
+    --color-back-1: hsl(0, 0%, calc(var(--back) var(--op)  2/32*100%));
+    --color-back0:  hsl(0, 0%, calc(var(--back) var(--op)  3/32*100%));
 	--color-back:   hsl(0, 0%, calc(var(--back) var(--op)  4/32*100%));
 	--color-back1:  hsl(0, 0%, calc(var(--back) var(--op)  5/32*100%));
 	--color-back2:  hsl(0, 0%, calc(var(--back) var(--op)  6/32*100%));
@@ -37,10 +40,11 @@
 	--color-bright: hsl(0, 0%, calc(var(--back) var(--op) 200%));
 }
 
-body { font-family: sans-serif; padding: 0 var(--margin); background-color: var(--color-back); color: var(--color-fore) }
+body { display: table; margin: 0 auto; font-family: sans-serif; padding: var(--margin) var(--margin) 0; background-color: var(--color-back); color: var(--color-fore) }
+input { background-color: var(--color-back-2); color: var(--color-bright) }
 /*@media (prefers-color-scheme: light) { body {background-color: initial } }*/
 
-* { border-width: 1px; border-color: var(--color-back7) }
+* { border-width: 1px; border-color: var(--color-back7);  box-sizing: border-box }
 
 a, abbr { text-decoration: none }
 a { color: hsl(var(--hue-a), 100%, var(--lum-fore)) }
@@ -57,3 +61,5 @@ table { margin: var(--margin) auto; padding: 0 }
 th { color: var(--color-aux); background: var(--color-back3) }
 caption { color: var(--color-title); padding-bottom: .5rem }
 .r { text-align: right }
+
+input {width: 100%}
