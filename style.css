@@ -41,7 +41,7 @@
 }
 
 body { display: table; margin: 0 auto; font-family: sans-serif; padding: var(--margin) var(--margin) 0; background-color: var(--color-back); color: var(--color-fore) }
-input { background-color: var(--color-back-2); color: var(--color-bright) }
+input { background-color: var(--color-back-2); color: var(--color-bright); font-size: medium }
 /*@media (prefers-color-scheme: light) { body {background-color: initial } }*/
 
 * { border-width: 1px; border-color: var(--color-back7);  box-sizing: border-box }

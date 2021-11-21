@@ -75,7 +75,7 @@ func HttpServe() {
 			"</form>\n"
 		body += "<table class=\"sans\">\n" +
 			"<caption>Latest blocks</caption>\n" +
-			"<thead class=\"thead\">\n" +
+			"<thead>\n" +
 			"<tr><th>DAA score</th><th>Timestamp, UTC</th><th>Hash</th><th><abbr title=\"Number of parents\">#P</abbr></th><th><abbr title=\"Number of transactions\">#Tx</abbr></th><th>Blue score</th></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n"
@@ -164,7 +164,7 @@ func HttpServe() {
 			tds += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td><td>" + FormatKaspa(amount) + "</td></tr>\n"
 		}
 		body += "<thead>\n" +
-			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount<br/>(" + FormatKaspa(totalAmount) + ")</th></tr>\n" +
+			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount</th></tr>\n" +
 			//"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n" + tds
@@ -438,7 +438,7 @@ func Html(head, body string) string {
 		"<head>\n" +
 		"<meta charset=\"UTF-8\"/>\n" +
 		"<meta name=\"viewport\" content=\"width=device-width\"/>\n" +
-		"<link rel=\"icon\" href=\"/phoenician-kaph.svg\"/>" +
+		"<link rel=\"icon\" href=\"/phoenician-kaph.svg\"/>\n" +
 		"<link rel=\"stylesheet\" href=\"/style.css\"/>\n" +
 		head +
 		"<title>Katnip</title>\n" +
