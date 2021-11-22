@@ -116,7 +116,9 @@ var BluestHashStr string
 var PruningPointsStr = make(map[string]uint64, 1)
 var LatestHashes [20]*Hash
 var LatestHashesTop int
+var RpcClient *rpcclient.RPCClient
 var KaspadVersion string
+var VirtualDAAScore, PastMedianTime, BlockCount string
 
 func main() {
 	dirName, err := os.UserHomeDir()
@@ -149,13 +151,13 @@ func main() {
 
 	go InsertingToDb()
 
-	var rpcClient *rpcclient.RPCClient
 	for {
 		Log(LogInf, "Connecting to Kaspad: %s", *rpcServerAddr)
-		rpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
-		info, err := rpcClient.GetInfo()
+		RpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
+		info, err := RpcClient.GetInfo()
 		PanicIfErr(err)
 		KaspadVersion = info.ServerVersion
+
 		if err == nil {
 			break
 		}
@@ -201,7 +203,7 @@ func main() {
 	ibdCount := 0
 	for {
 		Log(LogDbg, "getBlocks: %s", BluestHashStr)
-		response, err := rpcClient.GetBlocks(BluestHashStr, true, true)
+		response, err := RpcClient.GetBlocks(BluestHashStr, true, true)
 		if err != nil {
 			Log(LogErr, "%v", err)
 			continue
@@ -214,7 +216,7 @@ func main() {
 		if bluestHashStrLast == BluestHashStr {
 			break
 		}
-		Log(LogInf, "Inserting blocks: %3d, %s", numBlocks, TimestampFormat(uint64(rpcBlocks[len(rpcBlocks)-1].Header.Timestamp)))
+		Log(LogInf, "Inserting blocks: %3d, %s", numBlocks, FormatTimestamp(uint64(rpcBlocks[len(rpcBlocks)-1].Header.Timestamp)))
 	}
 	duration := time.Since(idbStartTime).Round(time.Second)
 	seconds := int(duration.Seconds())
@@ -225,9 +227,9 @@ func main() {
 	PanicIfErr(DbEnv.Sync(true))
 	Log(LogInf, "IBD finished: %d blocks, %s, %d bps", ibdCount, duration, bps)
 
-	PanicIfErr(rpcClient.RegisterForBlockAddedNotifications(func(notification *appmessage.BlockAddedNotificationMessage) {
+	PanicIfErr(RpcClient.RegisterForBlockAddedNotifications(func(notification *appmessage.BlockAddedNotificationMessage) {
 		hashStr := notification.Block.VerboseData.Hash
-		blockResponse, err := rpcClient.GetBlock(hashStr, true)
+		blockResponse, err := RpcClient.GetBlock(hashStr, true)
 		PanicIfErr(err)
 		AddToWriteChan(RpcBlocks{blockResponse.Block})
 		Log(LogInf, "Added block: %s", hashStr)
@@ -237,6 +239,11 @@ func main() {
 }
 
 func AddToWriteChan(rpcBlocks RpcBlocks) {
+	BDInfo, err := RpcClient.GetBlockDAGInfo()
+	PanicIfErr(err)
+	VirtualDAAScore = FormatNumber(BDInfo.VirtualDAAScore)
+	PastMedianTime = FormatTimestamp(uint64(BDInfo.PastMedianTime))
+	BlockCount = FormatNumber(BDInfo.BlockCount)
 	var bluestHashToWrite *Hash
 	for _, rpcBlock := range rpcBlocks {
 		blueWorkStr := rpcBlock.Header.BlueWork
@@ -509,7 +516,7 @@ func H2s(h Hash) string {
 	return B2s(h[:])
 }
 
-func TimestampFormat(timestamp uint64) string {
+func FormatTimestamp(timestamp uint64) string {
 	t := int64(timestamp)
 	return time.Unix(t/1000, t%1000).UTC().Format("2006-01-02 15-04-05.000000000")
 }
@@ -520,9 +527,9 @@ func FormatKaspa(sompi uint64) string {
 	result2 := result[point:]
 	i := point - 3
 	for ; i > 0; i -= 3 {
-		result2 = ","+result[i:i+3]+result2
+		result2 = "," + result[i:i+3] + result2
 	}
-	result2 = result[:i+3]+result2
+	result2 = result[:i+3] + result2
 	//Log(LogErr, "%s → %s" + result, result2)
 	return result2
 }

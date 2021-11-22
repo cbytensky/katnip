@@ -64,19 +64,22 @@ func HttpServe() {
 				}
 				return nil
 			})
-			if err != nil{
+			if err != nil {
 				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
-			}else {
+			} else {
 				http.Redirect(w, r, "/addr/"+searchStr, 301)
 			}
 		}
 		body := NotFound + "<form action=\"/\">\n" +
 			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address\"/>\n" +
 			"</form>\n"
-		body += "<table>\n" +
-			"<tbody>\n"+
-			"<tr><th>KaspaD version</th><td>"+KaspadVersion+"</td></tr>\n"+
-			"</tbody>\n"+
+		body += "<table class=\"sans\">\n" +
+			"<tbody>\n" +
+			"<tr><th>KaspaD version</th><td class=\"l\">" + KaspadVersion + "</td></tr>\n" +
+			"<tr><th>Virtual DAA score</th><td class=\"l\">" + VirtualDAAScore + "</td></tr>\n" +
+			"<tr><th>Past median time</th><td class=\"l\">" + PastMedianTime + "</td></tr>\n" +
+			"<tr><th>Block count</th><td class=\"l\">" + BlockCount + "</td></tr>\n" +
+			"</tbody>\n" +
 			"</table>"
 
 		body += "<table class=\"sans\">\n" +
@@ -93,7 +96,7 @@ func HttpServe() {
 				hashStr := H2s(*hash)
 				body += "<tr>" +
 					"<td>" + fmt.Sprintf("%d", block.DAAScore) + "</td>" +
-					"<td>" + TimestampFormat(block.Timestamp) + "</td>" +
+					"<td>" + FormatTimestamp(block.Timestamp) + "</td>" +
 					"<td><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></td>" +
 					"<td>" + fmt.Sprintf("%d", len(block.ParentLevels[0])) + "</td>" +
 					"<td>" + fmt.Sprintf("%d", len(block.TransactionIds)) + "</td>" +
@@ -251,7 +254,7 @@ func HttpServe() {
 				}
 			}
 			if name == "Timestamp" {
-				valueStr = TimestampFormat(value.(uint64))
+				valueStr = FormatTimestamp(value.(uint64))
 			}
 			if name == "TransactionIds" {
 				if block.IsHeaderOnly {
