@@ -42,7 +42,7 @@ func HttpServe() {
 				}
 				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
 			}
-			searchStr = url.PathEscape(searchStr)
+			searchStr = strings.ToLower(url.PathEscape(searchStr))
 			err := DbEnv.View(func(txn *lmdb.Txn) (err error) {
 				cursor, err := txn.OpenCursor(Db)
 				PanicIfErr(err)
