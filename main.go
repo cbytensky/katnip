@@ -116,6 +116,7 @@ var BluestHashStr string
 var PruningPointsStr = make(map[string]uint64, 1)
 var LatestHashes [20]*Hash
 var LatestHashesTop int
+var KaspadVersion string
 
 func main() {
 	dirName, err := os.UserHomeDir()
@@ -152,6 +153,9 @@ func main() {
 	for {
 		Log(LogInf, "Connecting to Kaspad: %s", *rpcServerAddr)
 		rpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
+		info, err := rpcClient.GetInfo()
+		PanicIfErr(err)
+		KaspadVersion = info.ServerVersion
 		if err == nil {
 			break
 		}

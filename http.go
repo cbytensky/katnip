@@ -73,6 +73,12 @@ func HttpServe() {
 		body := NotFound + "<form action=\"/\">\n" +
 			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address\"/>\n" +
 			"</form>\n"
+		body += "<table>\n" +
+			"<tbody>\n"+
+			"<tr><th>KaspaD version</th><td>"+KaspadVersion+"</td></tr>\n"+
+			"</tbody>\n"+
+			"</table>"
+
 		body += "<table class=\"sans\">\n" +
 			"<caption>Latest blocks</caption>\n" +
 			"<thead>\n" +
