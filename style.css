@@ -62,5 +62,6 @@ th { color: var(--color-aux); background: var(--color-back3) }
 caption { color: var(--color-title); padding-bottom: .5rem }
 .r { text-align: right }
 .l { text-align: left !important }
+.m * { font-family: monospace, monospace; font-size: 1em !important; }
 
 input {width: 100%}

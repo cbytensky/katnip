@@ -29,6 +29,7 @@ const (
 	PrefixAddress
 	PrefixBluestBlock
 	PrefixPruningPoints
+	PrefixBlockDagInfo
 )
 
 // types that is used in blockDAG structs
@@ -97,13 +98,28 @@ type (
 		Address       string
 		TransactionId Key
 	}
+
+	BlockDAGInfo struct {
+		KaspadVersion       string
+		BlockCount          uint64
+		HeaderCount         uint64
+		TipHashes           []Hash
+		VirtualParentHashes []Hash
+		Difficulty          float64
+		PastMedianTime      uint64
+		PruningPointIndex   uint64
+		VirtualDAAScore     uint64
+		LatestHashes        [NumLatestHashes]Hash
+		LatestHashesTop     uint64
+	}
 )
 
 type RpcBlocks []*appmessage.RPCBlock
 
 type WriteChanElem struct {
-	RpcBlocks  RpcBlocks
-	BluestHash *Hash
+	RpcBlocks       RpcBlocks
+	BluestHash      *Hash
+	RpcBlockDagInfo *appmessage.GetBlockDAGInfoResponseMessage
 }
 
 var DbEnv *lmdb.Env
@@ -114,11 +130,13 @@ var WriteChan = make(chan WriteChanElem, 10)
 var MaxBlueWorkStr string
 var BluestHashStr string
 var PruningPointsStr = make(map[string]uint64, 1)
-var LatestHashes [20]*Hash
+
+const NumLatestHashes = 20
+
+var LatestHashes [NumLatestHashes]*Hash
 var LatestHashesTop int
 var RpcClient *rpcclient.RPCClient
 var KaspadVersion string
-var VirtualDAAScore, PastMedianTime, BlockCount string
 
 func main() {
 	dirName, err := os.UserHomeDir()
@@ -152,17 +170,23 @@ func main() {
 	go InsertingToDb()
 
 	for {
-		Log(LogInf, "Connecting to Kaspad: %s", *rpcServerAddr)
+		Log(LogInf, "Connecting to KaspaD: %s", *rpcServerAddr)
 		RpcClient, err = rpcclient.NewRPCClient(*rpcServerAddr)
-		info, err := RpcClient.GetInfo()
-		PanicIfErr(err)
-		KaspadVersion = info.ServerVersion
-
 		if err == nil {
 			break
 		}
 		Log(LogErr, "%v", err)
 	}
+	Log(LogInf, "Connected to KaspaD: %s", *rpcServerAddr)
+	info, err := RpcClient.GetInfo()
+	PanicIfErr(err)
+	KaspadVersion = info.ServerVersion
+	//if info.Banner != "" {
+	//	Log(LogInf, "Kaspa node’s banner: %s", info.Banner)
+	//}
+	//if info.Banner != "" {
+	//	Log(LogInf, "Kaspa node’s donations address: %s", info.Donations)
+	//}
 
 	idbStartTime := time.Now()
 	Log(LogInf, "IBD stared")
@@ -178,6 +202,7 @@ func main() {
 	_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
 		cursor, err := txn.OpenCursor(Db)
 		PanicIfErr(err)
+		keyPrefix := []byte{PrefixPruningPoints}
 		key, val, err := cursor.Get([]byte{PrefixPruningPoints}, nil, lmdb.SetRange)
 		if lmdb.IsErrno(err, lmdb.NotFound) {
 			Log(LogInf, "Pruning points not stored")
@@ -185,6 +210,16 @@ func main() {
 		}
 		PanicIfErr(err)
 		for {
+			equal := true
+			for i, v := range keyPrefix {
+				if key[i] != v {
+					equal = false
+					break
+				}
+			}
+			if !equal {
+				break
+			}
 			var pruningPointIndex uint64
 			var pruningPoint Hash
 			SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&pruningPointIndex).Elem())
@@ -239,11 +274,8 @@ func main() {
 }
 
 func AddToWriteChan(rpcBlocks RpcBlocks) {
-	BDInfo, err := RpcClient.GetBlockDAGInfo()
+	blockDAGInfo, err := RpcClient.GetBlockDAGInfo()
 	PanicIfErr(err)
-	VirtualDAAScore = FormatNumber(BDInfo.VirtualDAAScore)
-	PastMedianTime = FormatTimestamp(uint64(BDInfo.PastMedianTime))
-	BlockCount = FormatNumber(BDInfo.BlockCount)
 	var bluestHashToWrite *Hash
 	for _, rpcBlock := range rpcBlocks {
 		blueWorkStr := rpcBlock.Header.BlueWork
@@ -254,7 +286,7 @@ func AddToWriteChan(rpcBlocks RpcBlocks) {
 			bluestHashToWrite = &bluestHash
 		}
 	}
-	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite}
+	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite, blockDAGInfo}
 }
 
 func InsertingToDb() {
@@ -288,7 +320,9 @@ func InsertingToDb() {
 					keyBlock := H2k(block.Hash)
 
 					for i, rpcTransaction := range rpcBlock.Transactions {
-						block.TransactionIds[i] = S2h(rpcTransaction.VerboseData.TransactionID)
+						if rpcTransaction.VerboseData != nil {
+							block.TransactionIds[i] = S2h(rpcTransaction.VerboseData.TransactionID)
+						}
 					}
 
 					// Pruning point
@@ -344,6 +378,9 @@ func InsertingToDb() {
 					// Transactions
 					for _, rpcTransaction := range rpcBlock.Transactions {
 						rpcTxVData := rpcTransaction.VerboseData
+						if rpcTxVData == nil {
+							continue
+						}
 						rpcInputs := rpcTransaction.Inputs
 						rpcOutputs := rpcTransaction.Outputs
 						transaction := Transaction{
@@ -408,6 +445,34 @@ func InsertingToDb() {
 					if err := dbPut(txn, PrefixBluestBlock, nil, bluestHash, true); err != nil {
 						return err
 					}
+				}
+				rpcBlockDagInfo := writeElem.RpcBlockDagInfo
+				blockDAGInfo := BlockDAGInfo{
+					KaspadVersion:       KaspadVersion,
+					BlockCount:          rpcBlockDagInfo.BlockCount,
+					HeaderCount:         rpcBlockDagInfo.HeaderCount,
+					Difficulty:          rpcBlockDagInfo.Difficulty,
+					PastMedianTime:      uint64(rpcBlockDagInfo.PastMedianTime),
+					VirtualDAAScore:     rpcBlockDagInfo.VirtualDAAScore,
+					PruningPointIndex:   PruningPointsStr[rpcBlockDagInfo.PruningPointHash],
+					TipHashes:           make([]Hash, len(rpcBlockDagInfo.TipHashes)),
+					VirtualParentHashes: make([]Hash, len(rpcBlockDagInfo.VirtualParentHashes)),
+				}
+				for i, hashStr := range rpcBlockDagInfo.TipHashes {
+					blockDAGInfo.TipHashes[i] = S2h(hashStr)
+				}
+
+				for i, hashStr := range rpcBlockDagInfo.VirtualParentHashes {
+					blockDAGInfo.TipHashes[i] = S2h(hashStr)
+				}
+				for i, hash := range LatestHashes {
+					if hash != nil {
+						blockDAGInfo.LatestHashes[i] = *hash
+					}
+				}
+				blockDAGInfo.LatestHashesTop = uint64(LatestHashesTop)
+				if err := dbPut(txn, PrefixBlockDagInfo, nil, &blockDAGInfo, true); err != nil {
+					return err
 				}
 				return nil
 			})

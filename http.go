@@ -73,14 +73,40 @@ func HttpServe() {
 		body := NotFound + "<form action=\"/\">\n" +
 			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address\"/>\n" +
 			"</form>\n"
-		body += "<table class=\"sans\">\n" +
-			"<tbody>\n" +
-			"<tr><th>KaspaD version</th><td class=\"l\">" + KaspadVersion + "</td></tr>\n" +
-			"<tr><th>Virtual DAA score</th><td class=\"l\">" + VirtualDAAScore + "</td></tr>\n" +
-			"<tr><th>Past median time</th><td class=\"l\">" + PastMedianTime + "</td></tr>\n" +
-			"<tr><th>Block count</th><td class=\"l\">" + BlockCount + "</td></tr>\n" +
-			"</tbody>\n" +
-			"</table>"
+
+		blockDAGInfo := BlockDAGInfo{}
+		if dbGet(PrefixBlockDagInfo, nil, &blockDAGInfo) {
+			pruningPoint := ""
+			for k, v := range PruningPointsStr {
+				if v == blockDAGInfo.PruningPointIndex {
+					pruningPoint = k
+					break
+				}
+			}
+			body += "<table class=\"sans\">\n" +
+				"<tbody>\n" +
+				"<tr><th>KaspaD version</th><td class=\"l\">" + blockDAGInfo.KaspadVersion + "</td></tr>\n" +
+				"<tr><th>Virtual DAA score</th><td class=\"l\">" + FormatNumber(blockDAGInfo.VirtualDAAScore) + "</td></tr>\n" +
+				"<tr><th>Past median time</th><td class=\"l\">" + FormatTimestamp(blockDAGInfo.PastMedianTime) + "</td></tr>\n" +
+				"<tr><th>Block header count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.HeaderCount) + "</td></tr>\n" +
+				"<tr><th>Block count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.BlockCount) + "</td></tr>\n" +
+				"<tr><th>Difficulty</th><td class=\"l\">" + fmt.Sprintf("%f", blockDAGInfo.Difficulty) + "</td></tr>\n" +
+				"<tr><th>Latest pruning point</th><td class=\"l m\"><a href=\"/block/" + pruningPoint + "\">" + pruningPoint + "</a></td></tr>\n" +
+				"<tr><th>Tip hashes</th><td class=\"l m\">"
+			for _, hash := range blockDAGInfo.TipHashes {
+				hashStr := H2s(hash)
+				body += fmt.Sprintf("<div><a href=\"/block/%s\">%s</a></div>\n", hashStr, hashStr)
+			}
+			body += "</td></tr>\n"
+			//	"<tr><th>Virtual parent hashes</th><td class=\"l m\">"
+			//for _, hash := range blockDAGInfo.VirtualParentHashes {
+			//	hashStr := H2s(hash)
+			//	body += fmt.Sprintf("<div><a href=\"/block/%s\">%s</a></div>\n", hashStr, hashStr)
+			//}
+			//body += "</td></tr>\n"
+			body += "</tbody>\n" +
+				"</table>"
+		}
 
 		body += "<table class=\"sans\">\n" +
 			"<caption>Latest blocks</caption>\n" +
@@ -88,12 +114,14 @@ func HttpServe() {
 			"<tr><th>DAA score</th><th>Timestamp, UTC</th><th>Hash</th><th><abbr title=\"Number of parents\">#P</abbr></th><th><abbr title=\"Number of transactions\">#Tx</abbr></th><th>Blue score</th></tr>\n" +
 			"</thead>\n" +
 			"<tbody>\n"
-		latestNum := len(LatestHashes)
+		latestHashes := blockDAGInfo.LatestHashes
+		latestNum := len(latestHashes)
 		var block Block
+		nilHash := Hash{}
 		for i := 0; i < latestNum; i++ {
-			hash := LatestHashes[(LatestHashesTop+latestNum-i)%latestNum]
-			if hash != nil && dbGet(PrefixBlock, (*hash)[:KeyLength], &block) {
-				hashStr := H2s(*hash)
+			hash := latestHashes[(int(blockDAGInfo.LatestHashesTop)+latestNum-i)%latestNum]
+			if hash != nilHash && dbGet(PrefixBlock, (hash)[:KeyLength], &block) {
+				hashStr := H2s(hash)
 				body += "<tr>" +
 					"<td>" + fmt.Sprintf("%d", block.DAAScore) + "</td>" +
 					"<td>" + FormatTimestamp(block.Timestamp) + "</td>" +

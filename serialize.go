@@ -86,6 +86,14 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 		} else {
 			metaValue.SetBool(bufferReadByte(buffer) == 1)
 		}
+	case reflect.Float64:
+		if isSer {
+			binary.Write(buffer, binary.LittleEndian, value)
+		} else {
+			var val float64
+			binary.Read(buffer, binary.LittleEndian, &val)
+			metaValue.SetFloat(val)
+		}
 	}
 }
 
