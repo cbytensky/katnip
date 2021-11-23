@@ -52,7 +52,7 @@ a:visited { color: hsl(var(--hue-visited), 100%, var(--lum-fore)) }
 
 table { border-collapse: collapse; max-width: 100%; background: var(--color-back1) }
 th { font-weight: normal; font-size: smaller }
-tbody > tr > th { text-align: right }
+tbody > tr > th { text-align: right; vertical-align: baseline; line-height: 1.2rem }
 td, th { border-style: solid; padding: .1rem .3rem }
 td { font-family: monospace, monospace; font-size: 1em }
 .sans td { font-family: inherit }
