@@ -92,12 +92,12 @@ func HttpServe() {
 				"<tr><th>Block count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.BlockCount) + "</td></tr>\n" +
 				"<tr><th>Difficulty</th><td class=\"l\">" + fmt.Sprintf("%f", blockDAGInfo.Difficulty) + "</td></tr>\n" +
 				"<tr><th>Latest pruning point</th><td class=\"l m\"><a href=\"/block/" + pruningPoint + "\">" + pruningPoint + "</a></td></tr>\n" +
-				"<tr><th>Tip hashes</th><td class=\"l m\">"
+				"<tr><th>Tip hashes (" + FormatNumber(len(blockDAGInfo.TipHashes)) + ")</th><td class=\"l m\"><div class=\"scroll\">"
 			for _, hash := range blockDAGInfo.TipHashes {
 				hashStr := H2s(hash)
 				body += fmt.Sprintf("<div><a href=\"/block/%s\">%s</a></div>\n", hashStr, hashStr)
 			}
-			body += "</td></tr>\n"
+			body += "</div></td></tr>\n"
 			//	"<tr><th>Virtual parent hashes</th><td class=\"l m\">"
 			//for _, hash := range blockDAGInfo.VirtualParentHashes {
 			//	hashStr := H2s(hash)

@@ -65,3 +65,4 @@ caption { color: var(--color-title); padding-bottom: .5rem }
 .m * { font-family: monospace, monospace; font-size: 1em !important; }
 
 input {width: 100%}
+div.scroll { max-height: 20vh; overflow-y: auto }
