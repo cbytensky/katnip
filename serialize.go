@@ -22,12 +22,12 @@ func SerializeValue(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 			if fieldValueFull, isNonce := fieldValue.(UInt64Full); isNonce {
 				uintBytes := make([]byte, 8)
 				if isSer {
-					binary.LittleEndian.PutUint64(uintBytes, uint64(fieldValueFull))
+					binary.BigEndian.PutUint64(uintBytes, uint64(fieldValueFull))
 					buffer.Write(uintBytes)
 				} else {
 					_, err := buffer.Read(uintBytes)
 					PanicIfErr(err)
-					metaField.SetUint(binary.LittleEndian.Uint64(uintBytes))
+					metaField.SetUint(binary.BigEndian.Uint64(uintBytes))
 				}
 			} else {
 				SerializeValue(isSer, buffer, metaField)

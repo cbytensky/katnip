@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -65,13 +67,18 @@ func HttpServe() {
 				return nil
 			})
 			if err != nil {
-				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
+				_, err := strconv.Atoi(searchStr)
+				if err == nil{
+					http.Redirect(w, r, "/bs/"+searchStr, 301)
+				} else {
+					NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
+				}
 			} else {
 				http.Redirect(w, r, "/addr/"+searchStr, 301)
 			}
 		}
 		body := NotFound + "<form action=\"/\">\n" +
-			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address\"/>\n" +
+			"<input name=\"s\" placeholder=\"Search for block hash, transaction id or hash, address, blue score\"/>\n" +
 			"</form>\n"
 
 		blockDAGInfo := BlockDAGInfo{}
@@ -122,13 +129,14 @@ func HttpServe() {
 			hash := latestHashes[(int(blockDAGInfo.LatestHashesTop)+latestNum-i)%latestNum]
 			if hash != nilHash && dbGet(PrefixBlock, (hash)[:KeyLength], &block) {
 				hashStr := H2s(hash)
+				blueScoreStr := fmt.Sprintf("%d", block.BlueScore)
 				body += "<tr>" +
 					"<td>" + fmt.Sprintf("%d", block.DAAScore) + "</td>" +
 					"<td>" + FormatTimestamp(block.Timestamp) + "</td>" +
 					"<td><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></td>" +
 					"<td>" + fmt.Sprintf("%d", len(block.ParentLevels[0])) + "</td>" +
 					"<td>" + fmt.Sprintf("%d", len(block.TransactionIds)) + "</td>" +
-					"<td>" + fmt.Sprintf("%d", block.BlueScore) + "</td>" +
+					"<td><a href=\"/bs/" + blueScoreStr + "\">" + blueScoreStr + "</a></td>" +
 					"</tr>\n"
 			}
 		}
@@ -142,6 +150,78 @@ func HttpServe() {
 				"</style>", body+
 				"</tbody>\n"+
 				"</table>\n")))
+	})
+	http.HandleFunc("/bs/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.Split(r.URL.Path, "/")
+		if len(path) < 3 {
+			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
+			return
+		}
+		blueScoreStr := path[2]
+		blueScoreInt, err := strconv.Atoi(blueScoreStr)
+		if err != nil {
+			HttpError(errors.New(fmt.Sprintf("Bad blue score: %v", path)), " decoding blue score", w)
+		}
+		body := "<table class=\"sans\">\n" +
+			"<caption>Blocks with blue score " + blueScoreStr + "</caption>\n" +
+			"<thead>\n" +
+			"<tr><th>DAA score</th><th>Timestamp, UTC</th><th>Hash</th><th><abbr title=\"Number of parents\">#P</abbr></th><th><abbr title=\"Number of transactions\">#Tx</abbr></th><th>Blue score</th></tr>\n" +
+			"</thead>\n" +
+			"<tbody>\n"
+		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+			cursor, err := txn.OpenCursor(Db)
+			PanicIfErr(err)
+			blueScoreKey := make([]byte, 8)
+			binary.BigEndian.PutUint64(blueScoreKey, uint64(blueScoreInt))
+			keyPrefix := append([]byte{PrefixBlueScoreBlock}, blueScoreKey...)
+			key, _, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+			if lmdb.IsErrno(err, lmdb.NotFound) {
+				return err
+			}
+			PanicIfErr(err)
+			for {
+				equal := true
+				for i, v := range keyPrefix {
+					if key[i] != v {
+						equal = false
+						break
+					}
+				}
+				if !equal {
+					break
+				}
+				var block Block
+				if dbGet(PrefixBlock, key[9:], &block) {
+					hashStr := H2s(block.Hash)
+					blueScoreStr := fmt.Sprintf("%d", block.BlueScore)
+					body += "<tr>" +
+						"<td>" + fmt.Sprintf("%d", block.DAAScore) + "</td>" +
+						"<td>" + FormatTimestamp(block.Timestamp) + "</td>" +
+						"<td><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></td>" +
+						"<td>" + fmt.Sprintf("%d", len(block.ParentLevels[0])) + "</td>" +
+						"<td>" + fmt.Sprintf("%d", len(block.TransactionIds)) + "</td>" +
+						"<td><a href=\"/bs/" + blueScoreStr + "\">" + blueScoreStr + "</a></td>" +
+						"</tr>\n"
+				}
+				key, _, err = cursor.Get(nil, nil, lmdb.Next)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					break
+				}
+				PanicIfErr(err)
+			}
+			return nil
+		})
+		w.Header().Set("Content-Type", "application/xhtml+xml")
+		w.Write([]byte(Html(
+			"<style>\n"+
+				"td:nth-of-type(1), td:nth-of-type(4), td:nth-of-type(5), td:nth-of-type(6) { text-align: right }\n"+
+				"td:nth-of-type(4) { width: 1em }\n"+
+				"td:nth-of-type(5) { width: 1.5em }\n"+
+				"td:nth-of-type(3) { font-family: monospace,monospace; font-size: 1em }\n"+
+				"</style>", body+
+				"</tbody>\n"+
+				"</table>\n")))
+
 	})
 	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.Split(r.URL.Path, "/")
@@ -272,6 +352,10 @@ func HttpServe() {
 					}
 				}
 			}
+			if name == "BlueScore" {
+				valueStr = "<a href=\"/bs/" + valueStr + "\">" + valueStr + "</a>"
+			}
+
 			if name == "Bits" {
 				valueStr = fmt.Sprintf("%x, %x", value, difficulty.CompactToBig(value.(uint32)))
 			}

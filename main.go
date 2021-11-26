@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ const ProgName = "Katnip"
 const (
 	PrefixBlock byte = iota
 	PrefixBlockChild
+	PrefixBlueScoreBlock
 	PrefixTransaction
 	PrefixTransactionHash
 	PrefixTransactionBlock
@@ -183,9 +185,6 @@ func main() {
 	KaspadVersion = info.ServerVersion
 	//if info.Banner != "" {
 	//	Log(LogInf, "Kaspa node’s banner: %s", info.Banner)
-	//}
-	//if info.Banner != "" {
-	//	Log(LogInf, "Kaspa node’s donations address: %s", info.Donations)
 	//}
 
 	idbStartTime := time.Now()
@@ -375,6 +374,13 @@ func InsertingToDb() {
 						return err
 					}
 
+					keyBlueScoreBlock := make([]byte, 8)
+					binary.BigEndian.PutUint64(keyBlueScoreBlock, block.BlueScore)
+					keyBlueScoreBlock = append(keyBlueScoreBlock, keyBlock[:]...)
+					if err := dbPut(txn, PrefixBlueScoreBlock, keyBlueScoreBlock, nil, false); err != nil {
+						return err
+					}
+
 					// Transactions
 					for _, rpcTransaction := range rpcBlock.Transactions {
 						rpcTxVData := rpcTransaction.VerboseData
@@ -463,7 +469,7 @@ func InsertingToDb() {
 				}
 
 				for i, hashStr := range rpcBlockDagInfo.VirtualParentHashes {
-					blockDAGInfo.TipHashes[i] = S2h(hashStr)
+					blockDAGInfo.VirtualParentHashes[i] = S2h(hashStr)
 				}
 				for i, hash := range LatestHashes {
 					if hash != nil {
