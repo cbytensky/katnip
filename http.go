@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var HttpPort *string
@@ -571,7 +572,12 @@ func HttpServe() {
 		w.Write([]byte(Html("", body)))
 	})
 	Log(LogInf, "HTTP server started, port: %s", *HttpPort)
-	go http.ListenAndServe(":"+*HttpPort, nil)
+	srv := http.Server{
+		Addr: ":"+*HttpPort,
+		WriteTimeout: 45*time.Second,
+
+	}
+	go srv.ListenAndServe()
 }
 
 func HttpError(err error, title string, w http.ResponseWriter) bool {
