@@ -29,7 +29,8 @@ func HttpServe() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		NotFound := ""
 		if keys, ok := r.URL.Query()["s"]; ok {
-			searchStr := keys[0]
+			searchStr, _ := url.QueryUnescape(keys[0])
+			searchStr = strings.ToLower(strings.TrimSpace(searchStr))
 			if hash, err := hex.DecodeString(searchStr); err == nil {
 				var block Block
 				if dbGet(PrefixBlock, hash[:KeyLength], &block) {
@@ -45,7 +46,6 @@ func HttpServe() {
 				}
 				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
 			}
-			searchStr = strings.ToLower(url.PathEscape(searchStr))
 			err := DbEnv.View(func(txn *lmdb.Txn) (err error) {
 				cursor, err := txn.OpenCursor(Db)
 				PanicIfErr(err)
