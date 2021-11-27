@@ -68,7 +68,7 @@ func HttpServe() {
 			})
 			if err != nil {
 				_, err := strconv.Atoi(searchStr)
-				if err == nil{
+				if err == nil {
 					http.Redirect(w, r, "/bs/"+searchStr, 301)
 				} else {
 					NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
@@ -229,8 +229,37 @@ func HttpServe() {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
 			return
 		}
+		body := ""
 		addr := path[2]
-		body := "<table>\n" +
+		response, err := RpcClient.GetUTXOsByAddresses([]string{addr})
+		if err == nil {
+			tbody := ""
+			total := uint64(0)
+			for _, entry := range (*response).Entries {
+				tick := ""
+				utxo := *entry.UTXOEntry
+				outpoint := *entry.Outpoint
+				if utxo.IsCoinbase {
+					tick = "✓"
+				}
+				txId := outpoint.TransactionID
+				tbody += "<tr><td>" + FormatKaspa(utxo.Amount) + "</td><td>" + tick + "</td><td><a href=\"" + txId + "\">" + txId + "</a></td>" +
+					"<td>" + FormatNumber(outpoint.Index) + "</td></tr>"
+				total += utxo.Amount
+			}
+			body += "<table>\n" +
+				"<caption>UTXOs of address " + addr + "<br/>(unsorted)</caption>\n" +
+				"<thead>\n" +
+				"<tr><td><strong>" + FormatKaspa(total) + "</strong></td><th colspan=\"3\" class=\"l\">Current balance, KAS</th></tr>\n" +
+				"<tr><th>Amount</th><th><abbr title=\"Is conbase transaction\">C</abbr></th>" +
+				"<th>Transaction Id</th><th><abbr title=\"transation output index\">Idx</abbr></th></tr>\n" +
+				"</thead>\n" +
+				"<tbody>\n"
+			body += tbody +
+				"</tbody>\n" +
+				"</table>\n"
+		}
+		body += "<table>\n" +
 			"<caption>Outputs of address " + addr + "</caption>\n"
 		txIds := make([]Key, 0)
 		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
