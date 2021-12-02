@@ -25,9 +25,9 @@
 	--color-caption:     hsl(var(--hue-caption), 75%, var(--lum-fore));
 	--color-caption-aux: hsl(var(--hue-caption), var(--saturation-aux), var(--lum-aux));
 
-    --color-back-2: hsl(0, 0%, calc(var(--back) var(--op)  1/32*100%));
-    --color-back-1: hsl(0, 0%, calc(var(--back) var(--op)  2/32*100%));
-    --color-back0:  hsl(0, 0%, calc(var(--back) var(--op)  3/32*100%));
+	--color-back-2: hsl(0, 0%, calc(var(--back) var(--op)  1/32*100%));
+	--color-back-1: hsl(0, 0%, calc(var(--back) var(--op)  2/32*100%));
+	--color-back0:  hsl(0, 0%, calc(var(--back) var(--op)  3/32*100%));
 	--color-back:   hsl(0, 0%, calc(var(--back) var(--op)  4/32*100%));
 	--color-back1:  hsl(0, 0%, calc(var(--back) var(--op)  5/32*100%));
 	--color-back2:  hsl(0, 0%, calc(var(--back) var(--op)  6/32*100%));
@@ -63,6 +63,7 @@ caption { color: var(--color-title); padding-bottom: .5rem }
 .r { text-align: right }
 .l { text-align: left !important }
 .m * { font-family: monospace, monospace; font-size: 1em !important; }
+.comment { text-align: center; opacity: 0.8 }
 
 input {width: 100%}
 /*div.scroll { max-height: 2vh; overflow-y: auto; padding-right: 20px }*/
