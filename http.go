@@ -245,7 +245,7 @@ func HttpServe() {
 					tick = "✓"
 				}
 				txId := outpoint.TransactionID
-				tbody += "<tr><td>" + FormatKaspa(utxo.Amount) + "</td><td>" + tick + "</td><td><a href=\"" + txId + "\">" + txId + "</a></td>" +
+				tbody += "<tr><td>" + FormatKaspa(utxo.Amount) + "</td><td>" + tick + "</td><td><a href=\"/tx/" + txId + "\">" + txId + "</a></td>" +
 					"<td>" + FormatNumber(outpoint.Index) + "</td></tr>"
 				total += utxo.Amount
 			}
