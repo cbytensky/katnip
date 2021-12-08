@@ -11,6 +11,8 @@ import (
 	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -24,8 +26,11 @@ func AddFlagHttp() {
 }
 
 func HttpServe() {
-	http.Handle("/style.css", http.FileServer(http.Dir(".")))
-	http.Handle("/phoenician-kaph.svg", http.FileServer(http.Dir(".")))
+	binfilename, err := os.Executable()
+	PanicIfErr(err)
+	fileServer := http.FileServer(http.Dir(filepath.Dir(binfilename)))
+	http.Handle("/style.css", fileServer)
+	http.Handle("/phoenician-kaph.svg", fileServer)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		NotFound := ""
 		if keys, ok := r.URL.Query()["s"]; ok {
