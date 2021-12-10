@@ -589,7 +589,7 @@ func H2s(h Hash) string {
 
 func FormatTimestamp(timestamp uint64) string {
 	t := int64(timestamp)
-	return time.Unix(t/1000, t%1000).UTC().Format("2006-01-02 15-04-05.000000000")
+	return time.Unix(t/1000, t%1000).UTC().Format("2006-01-02 15:04:05.000000000")
 }
 
 func FormatKaspa(sompi uint64) string {
