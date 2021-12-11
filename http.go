@@ -238,94 +238,98 @@ func HttpServe() {
 		}
 		body := ""
 		addr := path[2]
-		response, err := RpcClient.GetUTXOsByAddresses([]string{addr})
-		if err == nil {
-			tbody := ""
-			total := uint64(0)
-			for _, entry := range (*response).Entries {
-				tick := ""
-				utxo := *entry.UTXOEntry
-				outpoint := *entry.Outpoint
-				if utxo.IsCoinbase {
-					tick = "✓"
+		if len(path) <= 3 || path[3] != "outputs" {
+			response, err := RpcClient.GetUTXOsByAddresses([]string{addr})
+			if err == nil {
+				tbody := ""
+				total := uint64(0)
+				for _, entry := range (*response).Entries {
+					tick := ""
+					utxo := *entry.UTXOEntry
+					outpoint := *entry.Outpoint
+					if utxo.IsCoinbase {
+						tick = "✓"
+					}
+					txId := outpoint.TransactionID
+					tbody += "<tr><td>" + FormatKaspa(utxo.Amount) + "</td><td>" + tick + "</td><td><a href=\"/tx/" + txId + "\">" + txId + "</a></td>" +
+						"<td>" + FormatNumber(outpoint.Index) + "</td></tr>\n"
+					total += utxo.Amount
 				}
-				txId := outpoint.TransactionID
-				tbody += "<tr><td>" + FormatKaspa(utxo.Amount) + "</td><td>" + tick + "</td><td><a href=\"/tx/" + txId + "\">" + txId + "</a></td>" +
-					"<td>" + FormatNumber(outpoint.Index) + "</td></tr>"
-				total += utxo.Amount
+				body += "<table>\n" +
+					"<caption>UTXOs of address " + addr + "<br/>(unsorted)</caption>\n" +
+					"<thead>\n" +
+					"<tr><td><strong>" + FormatKaspa(total) + "</strong></td><th colspan=\"3\" class=\"l\">Current balance, KAS</th></tr>\n" +
+					"<tr><th>Amount</th><th><abbr title=\"Is conbase transaction\">C</abbr></th>" +
+					"<th>Transaction Id</th><th><abbr title=\"transation output index\">Idx</abbr></th></tr>\n" +
+					"</thead>\n" +
+					"<tbody>\n"
+				body += tbody +
+					"</tbody>\n" +
+					"</table>\n"
 			}
+		}
+		if len(path) <= 3 || path[3] != "balance" {
 			body += "<table>\n" +
-				"<caption>UTXOs of address " + addr + "<br/>(unsorted)</caption>\n" +
-				"<thead>\n" +
-				"<tr><td><strong>" + FormatKaspa(total) + "</strong></td><th colspan=\"3\" class=\"l\">Current balance, KAS</th></tr>\n" +
-				"<tr><th>Amount</th><th><abbr title=\"Is conbase transaction\">C</abbr></th>" +
-				"<th>Transaction Id</th><th><abbr title=\"transation output index\">Idx</abbr></th></tr>\n" +
+				"<caption>Outputs of address " + addr + "</caption>\n"
+			txIds := make([]Key, 0)
+			_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+				cursor, err := txn.OpenCursor(Db)
+				PanicIfErr(err)
+				keyPrefix := append([]byte{PrefixAddress}, Serialize(&addr)...)
+				key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					return err
+				}
+				PanicIfErr(err)
+				for {
+					equal := true
+					for i, v := range keyPrefix {
+						if key[i] != v {
+							equal = false
+							break
+						}
+					}
+					if !equal {
+						break
+					}
+					var addressKey AddressTransaction
+					SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&addressKey).Elem())
+					txIds = append(txIds, addressKey.TransactionId)
+					key, val, err = cursor.Get(nil, nil, lmdb.Next)
+					if lmdb.IsErrno(err, lmdb.NotFound) {
+						break
+					}
+					PanicIfErr(err)
+				}
+				_ = val
+				return nil
+			})
+			tds := ""
+			totalAmount := uint64(0)
+			for _, txId := range txIds {
+				var tx Transaction
+				dbGet(PrefixTransaction, txId[:], &tx)
+				idStr := H2s(tx.Id)
+				amount := uint64(0)
+				for _, output := range tx.Outputs {
+					if output.ScriptPublicKeyAddress == addr {
+						amount += output.Amount
+					}
+				}
+				totalAmount += amount
+				tds += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td><td>" + FormatKaspa(amount) + "</td></tr>\n"
+			}
+			body += "<thead>\n" +
+				"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount</th></tr>\n" +
+				//"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
 				"</thead>\n" +
-				"<tbody>\n"
-			body += tbody +
+				"<tbody>\n" +
+				tds +
 				"</tbody>\n" +
 				"</table>\n"
 		}
-		body += "<table>\n" +
-			"<caption>Outputs of address " + addr + "</caption>\n"
-		txIds := make([]Key, 0)
-		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
-			cursor, err := txn.OpenCursor(Db)
-			PanicIfErr(err)
-			keyPrefix := append([]byte{PrefixAddress}, Serialize(&addr)...)
-			key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
-			if lmdb.IsErrno(err, lmdb.NotFound) {
-				return err
-			}
-			PanicIfErr(err)
-			for {
-				equal := true
-				for i, v := range keyPrefix {
-					if key[i] != v {
-						equal = false
-						break
-					}
-				}
-				if !equal {
-					break
-				}
-				var addressKey AddressTransaction
-				SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&addressKey).Elem())
-				txIds = append(txIds, addressKey.TransactionId)
-				key, val, err = cursor.Get(nil, nil, lmdb.Next)
-				if lmdb.IsErrno(err, lmdb.NotFound) {
-					break
-				}
-				PanicIfErr(err)
-			}
-			_ = val
-			return nil
-		})
-		tds := ""
-		totalAmount := uint64(0)
-		for _, txId := range txIds {
-			var tx Transaction
-			dbGet(PrefixTransaction, txId[:], &tx)
-			idStr := H2s(tx.Id)
-			amount := uint64(0)
-			for _, output := range tx.Outputs {
-				if output.ScriptPublicKeyAddress == addr {
-					amount += output.Amount
-				}
-			}
-			totalAmount += amount
-			tds += "<tr><td><a href=\"/tx/" + idStr + "\">" + idStr + "</a></td><td>" + FormatKaspa(amount) + "</td></tr>\n"
-		}
-		body += "<thead>\n" +
-			"<tr><th>Transaction Id (" + FormatNumber(len(txIds)) + ")</th><th>Amount</th></tr>\n" +
-			//"<tr><th class=\"r\">Total amount of unpruned outputs</th><td>" + FormatKaspa(totalAmount) + "</td></tr>\n" +
-			"</thead>\n" +
-			"<tbody>\n" + tds
-
 		w.Header().Set("Content-Type", "application/xhtml+xml")
-		w.Write([]byte(Html("<style>\ntd{ text-align: right }</style>\n", body+
-			"</tbody>\n"+
-			"</table>\n")))
+		w.Write([]byte(Html("<style>\ntd{ text-align: right }</style>\n", body)))
 	})
 	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.Split(r.URL.Path, "/")
@@ -579,9 +583,8 @@ func HttpServe() {
 	})
 	Log(LogInf, "HTTP server started, port: %s", *HttpPort)
 	srv := http.Server{
-		Addr: ":"+*HttpPort,
-		WriteTimeout: 45*time.Second,
-
+		Addr:         ":" + *HttpPort,
+		WriteTimeout: 45 * time.Second,
 	}
 	go srv.ListenAndServe()
 }
