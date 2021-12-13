@@ -156,7 +156,8 @@ func HttpServe() {
 				"</style>", body+
 				"</tbody>\n"+
 				"</table>\n"+
-				"<p class=\"comment\">Github: <a href=\"https://github.com/cbytensky/katnip\">https://github.com/cbytensky/katnip</a></p>")))
+				"<p>Oops! We have problem and already working on it.</p>\n"+
+				"<p class=\"comment\">Github: <a href=\"https://github.com/cbytensky/katnip\">https://github.com/cbytensky/katnip</a></p>\n")))
 	})
 	http.HandleFunc("/bs/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.Split(r.URL.Path, "/")
