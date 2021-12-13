@@ -235,6 +235,11 @@ func main() {
 		return nil
 	})
 	ibdCount := 0
+	if BluestHashStr == ""{
+		bdi, err := RpcClient.GetBlockDAGInfo()
+		PanicIfErr(err)
+		BluestHashStr = bdi.PruningPointHash
+	}
 	for {
 		Log(LogDbg, "getBlocks: %s", BluestHashStr)
 		response, err := RpcClient.GetBlocks(BluestHashStr, true, true)
