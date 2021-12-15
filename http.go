@@ -505,7 +505,48 @@ func HttpServe() {
 			hashStr := H2s(block.Hash)
 			body += "<div><a href=\"/block/" + hashStr + "\">" + hashStr + "</a></div>\n"
 		}
-
+		txKeys := make([]Key, 0)
+		_ = DbEnv.View(func(txn *lmdb.Txn) (err error) {
+			cursor, err := txn.OpenCursor(Db)
+			PanicIfErr(err)
+			keyPrefix := append([]byte{PrefixTransactionSpent}, transaction.Id[:KeyLength]...)
+			key, val, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
+			if lmdb.IsErrno(err, lmdb.NotFound) {
+				return err
+			}
+			PanicIfErr(err)
+			for {
+				var transactionSpent TransactionSpent
+				SerializeValue(false, bytes.NewBuffer(key[1:]), reflect.ValueOf(&transactionSpent).Elem())
+				equal := true
+				for i, v := range keyPrefix {
+					if key[i] != v {
+						equal = false
+						break
+					}
+				}
+				if !equal {
+					break
+				}
+				txKeys = append(txKeys, transactionSpent.SpentTransactionKey)
+				key, val, err = cursor.Get(nil, nil, lmdb.Next)
+				if lmdb.IsErrno(err, lmdb.NotFound) {
+					break
+				}
+				PanicIfErr(err)
+			}
+			_ = val
+			return nil
+		})
+		if len(txKeys) > 0 {
+			body += "<tr><th>Spents (" + fmt.Sprintf("%d", len(txKeys)) + ")</th><td>"
+			for _, txKey := range txKeys {
+				var tx Transaction
+				dbGet(PrefixTransaction, txKey[:], &tx)
+				idStr := H2s(tx.Id)
+				body += "<div><a href=\"/tx/" + idStr + "\">" + idStr + "</a></div>\n"
+			}
+		}
 		body += "</tr>\n" +
 			"</table>\n"
 		body += "<table>\n" +
@@ -534,6 +575,9 @@ func HttpServe() {
 				}
 				if bytes, isBytes := value.(Bytes); isBytes {
 					valueStr = B2s(bytes)
+				}
+				if name == "PreviousTransactionID" {
+					valueStr = "<a href=\""+valueStr+"\">" + valueStr + "</a>"
 				}
 				body += fmt.Sprintf("<td>%s</td>\n", valueStr)
 			}

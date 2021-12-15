@@ -32,6 +32,7 @@ const (
 	PrefixBluestBlock
 	PrefixPruningPoints
 	PrefixBlockDagInfo
+	PrefixTransactionSpent
 )
 
 // types that is used in blockDAG structs
@@ -94,6 +95,11 @@ type (
 	TransactionBlock struct {
 		TransactionKey Key
 		BlockKey       Key
+	}
+
+	TransactionSpent struct {
+		TransactionKey      Key
+		SpentTransactionKey Key
 	}
 
 	AddressTransaction struct {
@@ -235,7 +241,7 @@ func main() {
 		return nil
 	})
 	ibdCount := 0
-	if BluestHashStr == ""{
+	if BluestHashStr == "" {
 		bdi, err := RpcClient.GetBlockDAGInfo()
 		PanicIfErr(err)
 		BluestHashStr = bdi.PruningPointHash
@@ -408,12 +414,16 @@ func InsertingToDb() {
 
 						for i, rpcInput := range rpcInputs {
 							rpcPrevious := rpcInput.PreviousOutpoint
+							previousTransactionId := S2h(rpcPrevious.TransactionID)
 							transaction.Inputs[i] = Input{
 								Sequence:              rpcInput.Sequence,
-								PreviousTransactionID: S2h(rpcPrevious.TransactionID),
+								PreviousTransactionID: previousTransactionId,
 								PreviousIndex:         rpcPrevious.Index,
 								SignatureScript:       S2b(rpcInput.SignatureScript),
 								SignatureOpCount:      rpcInput.SigOpCount,
+							}
+							if err := dbPut(txn, PrefixTransactionSpent, Serialize(&TransactionSpent{H2k(previousTransactionId), key}), nil, false); err != nil {
+								return err
 							}
 						}
 						for i, rpcOutput := range rpcOutputs {
