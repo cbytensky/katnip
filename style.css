@@ -64,6 +64,6 @@ caption { color: var(--color-title); padding-bottom: .5rem }
 .l { text-align: left !important }
 .m * { font-family: monospace, monospace; font-size: 1em !important; }
 .comment { text-align: center; opacity: 0.8 }
-
+small {font-size: medium; color: var(--color-aux) }
 input {width: 100%}
 /*div.scroll { max-height: 2vh; overflow-y: auto; padding-right: 20px }*/
