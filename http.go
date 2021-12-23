@@ -238,7 +238,7 @@ func HttpServe() {
 		}
 		body := ""
 		addr := path[2]
-		if len(path) <= 3 || path[3] != "outputs" {
+		if len(path) == 4 && path[3] == "utxos" {
 			response, err := RpcClient.GetUTXOsByAddresses([]string{addr})
 			if err == nil {
 				tbody := ""
@@ -267,8 +267,11 @@ func HttpServe() {
 					"</tbody>\n" +
 					"</table>\n"
 			}
-		}
-		if len(path) <= 3 || path[3] != "balance" {
+		} else {
+			response, err := RpcClient.GetBalanceByAddress(addr)
+			if err == nil {
+				body += "<p><small>Balance:</small> " + FormatKaspa(response.Balance) + "</p>"
+			}
 			body += "<table>\n" +
 				"<caption>Outputs of address " + addr + "</caption>\n"
 			txIds := make([]Key, 0)
