@@ -51,36 +51,14 @@ func HttpServe() {
 				}
 				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
 			}
-			err := DbEnv.View(func(txn *lmdb.Txn) (err error) {
-				cursor, err := txn.OpenCursor(Db)
-				PanicIfErr(err)
-				keyPrefix := append([]byte{PrefixAddress}, Serialize(&searchStr)...)
-				key, _, err := cursor.Get(keyPrefix, nil, lmdb.SetRange)
-				if lmdb.IsErrno(err, lmdb.NotFound) {
-					return err
-				}
-				PanicIfErr(err)
-				equal := true
-				for i, v := range keyPrefix {
-					if key[i] != v {
-						equal = false
-						break
-					}
-				}
-				if !equal {
-					return errors.New("asdf")
-				}
-				return nil
-			})
-			if err != nil {
-				_, err := strconv.Atoi(searchStr)
-				if err == nil {
-					http.Redirect(w, r, "/bs/"+searchStr, 301)
-				} else {
-					NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
-				}
-			} else {
+			if strings.HasPrefix(searchStr, "kaspa:") {
 				http.Redirect(w, r, "/addr/"+searchStr, 301)
+			}
+			_, err := strconv.Atoi(searchStr)
+			if err == nil {
+				http.Redirect(w, r, "/bs/"+searchStr, 301)
+			} else {
+				NotFound = "<p><strong>Not found:</strong> " + searchStr + "</p>"
 			}
 		}
 		body := NotFound + "<form action=\"/\">\n" +
@@ -580,7 +558,7 @@ func HttpServe() {
 					valueStr = B2s(bytes)
 				}
 				if name == "PreviousTransactionID" {
-					valueStr = "<a href=\""+valueStr+"\">" + valueStr + "</a>"
+					valueStr = "<a href=\"" + valueStr + "\">" + valueStr + "</a>"
 				}
 				body += fmt.Sprintf("<td>%s</td>\n", valueStr)
 			}
