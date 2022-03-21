@@ -31,7 +31,9 @@ func HttpServe() {
 	fileServer := http.FileServer(http.Dir(filepath.Dir(binfilename)))
 	http.Handle("/style.css", fileServer)
 	http.Handle("/phoenician-kaph.svg", fileServer)
+	http.Handle("/robots.txt", fileServer)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogInf, "Get: " + r.URL.Path)
 		NotFound := ""
 		if keys, ok := r.URL.Query()["s"]; ok {
 			searchStr, _ := url.QueryUnescape(keys[0])
@@ -137,6 +139,7 @@ func HttpServe() {
 				"<p class=\"comment\">Github: <a href=\"https://github.com/cbytensky/katnip\">https://github.com/cbytensky/katnip</a></p>\n")))
 	})
 	http.HandleFunc("/bs/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogInf, "Get: " + r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -209,6 +212,7 @@ func HttpServe() {
 
 	})
 	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogInf, "Get: " + r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -313,6 +317,7 @@ func HttpServe() {
 		w.Write([]byte(Html("<style>\ntd{ text-align: right }</style>\n", body)))
 	})
 	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogInf, "Get: " + r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -409,6 +414,7 @@ func HttpServe() {
 
 	})
 	http.HandleFunc("/tx/", func(w http.ResponseWriter, r *http.Request) {
+		Log(LogInf, "Get: " + r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
