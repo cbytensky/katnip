@@ -32,6 +32,19 @@ func HttpServe() {
 	http.Handle("/style.css", fileServer)
 	http.Handle("/phoenician-kaph.svg", fileServer)
 	http.Handle("/robots.txt", fileServer)
+	http.HandleFunc("/totalcoins", func(w http.ResponseWriter, r *http.Request) {
+		var html string
+		supply, err := RpcClient.GetCoinSupply()
+		if err != nil {
+			html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
+			"Not Found" +
+			"</pre></body></html>"
+		}
+		html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
+		FormatKaspa(supply.BlueScore) +
+		"</pre></body></html>"
+		w.Write([]byte(html))
+	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		Log(LogInf, "Get: " + r.URL.Path)
 		NotFound := ""
