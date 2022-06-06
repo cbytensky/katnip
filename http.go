@@ -39,10 +39,11 @@ func HttpServe() {
 			html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
 			"Not Found" +
 			"</pre></body></html>"
+		} else {
+			html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
+			FormatKaspa(supply.circulatingSompi) +
+			"</pre></body></html>"
 		}
-		html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
-		FormatKaspa(supply.circulatingSompi) +
-		"</pre></body></html>"
 		w.Write([]byte(html))
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
