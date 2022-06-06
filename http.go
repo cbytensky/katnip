@@ -41,7 +41,7 @@ func HttpServe() {
 			"</pre></body></html>"
 		} else {
 			html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
-			FormatKaspa(supply.circulatingSompi) +
+			FormatKaspa(supply.CirculatingSompi) +
 			"</pre></body></html>"
 		}
 		w.Write([]byte(html))
