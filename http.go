@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/kaspanet/kaspad/util/difficulty"
+	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,7 +42,7 @@ func HttpServe() {
 			"</pre></body></html>"
 		} else {
 			html = "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">" +
-			FormatKaspa(supply.CirculatingSompi) +
+			fmt.Sprintf("%.8f", float64(supply.CirculatingSompi)/constants.SompiPerKaspa) +
 			"</pre></body></html>"
 		}
 		w.Write([]byte(html))
