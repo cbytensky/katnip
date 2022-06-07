@@ -119,15 +119,17 @@ type (
 		VirtualDAAScore     uint64
 		LatestHashes        [NumLatestHashes]Hash
 		LatestHashesTop     uint64
+		CirculatingSupply   UInt64Full
 	}
 )
 
 type RpcBlocks []*appmessage.RPCBlock
 
 type WriteChanElem struct {
-	RpcBlocks       RpcBlocks
-	BluestHash      *Hash
-	RpcBlockDagInfo *appmessage.GetBlockDAGInfoResponseMessage
+	RpcBlocks         RpcBlocks
+	BluestHash        *Hash
+	RpcBlockDagInfo   *appmessage.GetBlockDAGInfoResponseMessage
+	CirculatingSupply uint64
 }
 
 var DbEnv *lmdb.Env
@@ -284,7 +286,9 @@ func main() {
 }
 
 func AddToWriteChan(rpcBlocks RpcBlocks) {
-	blockDAGInfo, err := RpcClient.GetBlockDAGInfo()
+	rpcBlockDAGInfo, err := RpcClient.GetBlockDAGInfo()
+	PanicIfErr(err)
+	rpcCoinSupply, err := RpcClient.GetCoinSupply()
 	PanicIfErr(err)
 	var bluestHashToWrite *Hash
 	for _, rpcBlock := range rpcBlocks {
@@ -296,7 +300,7 @@ func AddToWriteChan(rpcBlocks RpcBlocks) {
 			bluestHashToWrite = &bluestHash
 		}
 	}
-	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite, blockDAGInfo}
+	WriteChan <- WriteChanElem{rpcBlocks, bluestHashToWrite, rpcBlockDAGInfo, rpcCoinSupply.CirculatingSompi}
 }
 
 func InsertingToDb() {
@@ -478,6 +482,7 @@ func InsertingToDb() {
 					PruningPointIndex:   PruningPointsStr[rpcBlockDagInfo.PruningPointHash],
 					TipHashes:           make([]Hash, len(rpcBlockDagInfo.TipHashes)),
 					VirtualParentHashes: make([]Hash, len(rpcBlockDagInfo.VirtualParentHashes)),
+					CirculatingSupply:   UInt64Full(writeElem.CirculatingSupply),
 				}
 				for i, hashStr := range rpcBlockDagInfo.TipHashes {
 					blockDAGInfo.TipHashes[i] = S2h(hashStr)

@@ -48,7 +48,7 @@ func HttpServe() {
 		w.Write([]byte(html))
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogInf, "Get: " + r.URL.Path)
+		Log(LogInf, "Get: "+r.URL.Path)
 		NotFound := ""
 		if keys, ok := r.URL.Query()["s"]; ok {
 			searchStr, _ := url.QueryUnescape(keys[0])
@@ -96,6 +96,7 @@ func HttpServe() {
 				"<tr><th>KaspaD version</th><td class=\"l\">" + blockDAGInfo.KaspadVersion + "</td></tr>\n" +
 				"<tr><th>Virtual DAA score</th><td class=\"l\">" + FormatNumber(blockDAGInfo.VirtualDAAScore) + "</td></tr>\n" +
 				"<tr><th>Past median time</th><td class=\"l\">" + FormatTimestamp(blockDAGInfo.PastMedianTime) + "</td></tr>\n" +
+				"<tr><th>Circulating supply</th><td class=\"l\">" + FormatKaspa(uint64(blockDAGInfo.CirculatingSupply)) + "</td></tr>\n" +
 				"<tr><th>Block header count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.HeaderCount) + "</td></tr>\n" +
 				"<tr><th>Block count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.BlockCount) + "</td></tr>\n" +
 				"<tr><th>Difficulty</th><td class=\"l\">" + fmt.Sprintf("%f", blockDAGInfo.Difficulty) + "</td></tr>\n" +
@@ -154,7 +155,7 @@ func HttpServe() {
 				"<p class=\"comment\">Github: <a href=\"https://github.com/cbytensky/katnip\">https://github.com/cbytensky/katnip</a></p>\n")))
 	})
 	http.HandleFunc("/bs/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogInf, "Get: " + r.URL.Path)
+		Log(LogInf, "Get: "+r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -227,7 +228,7 @@ func HttpServe() {
 
 	})
 	http.HandleFunc("/addr/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogInf, "Get: " + r.URL.Path)
+		Log(LogInf, "Get: "+r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -332,7 +333,7 @@ func HttpServe() {
 		w.Write([]byte(Html("<style>\ntd{ text-align: right }</style>\n", body)))
 	})
 	http.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogInf, "Get: " + r.URL.Path)
+		Log(LogInf, "Get: "+r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
@@ -429,7 +430,7 @@ func HttpServe() {
 
 	})
 	http.HandleFunc("/tx/", func(w http.ResponseWriter, r *http.Request) {
-		Log(LogInf, "Get: " + r.URL.Path)
+		Log(LogInf, "Get: "+r.URL.Path)
 		path := strings.Split(r.URL.Path, "/")
 		if len(path) < 3 {
 			HttpError(errors.New(fmt.Sprintf("Malformed path: %v", path)), "", w)
