@@ -621,7 +621,6 @@ func FormatKaspa(sompi uint64) string {
 		result2 = "," + result[i:i+3] + result2
 	}
 	result2 = result[:i+3] + result2
-	//Log(LogErr, "%s → %s" + result, result2)
 	return result2
 }
 

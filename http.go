@@ -20,10 +20,20 @@ import (
 	"time"
 )
 
-var HttpPort *string
+var (
+HttpPort *string
+HttpsPort *string
+IsHttps *bool
+CertFile *string
+KeyFile *string
+)
 
 func AddFlagHttp() {
+	IsHttps = flag.Bool("https", true, "Use HTTPS")
 	HttpPort = flag.String("httpport", "80", "HTTP server port")
+	HttpsPort = flag.String("httpsport", "443", "HTTPS server port")
+	CertFile = flag.String("certfile", "", "CA certificate file")
+	KeyFile = flag.String("keyfile", "", "CA certificate file")
 }
 
 func HttpServe() {
@@ -628,12 +638,28 @@ func HttpServe() {
 			"</table>\n"
 		w.Write([]byte(Html("", body)))
 	})
-	Log(LogInf, "HTTP server started, port: %s", *HttpPort)
 	srv := http.Server{
-		Addr:         ":" + *HttpPort,
 		WriteTimeout: 45 * time.Second,
 	}
-	go srv.ListenAndServe()
+
+	if *IsHttps {
+		srv.Addr = ":" + *HttpsPort
+		go func() {
+			PanicIfErr(srv.ListenAndServeTLS(*CertFile, *KeyFile))
+		}()
+		Log(LogInf, "HTTPS server started, port: %s", *HttpPort)
+		go func() {
+			PanicIfErr(http.ListenAndServe(":" + *HttpPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+				http.Redirect(w, r, "https://" + r.Host + r.RequestURI, http.StatusMovedPermanently)
+			})))
+		}()
+		Log(LogInf, "HTTP redirect server started, port: %s", *HttpPort)
+	} else {
+		srv.Addr = ":" + *HttpPort
+		println("before http")
+		go PanicIfErr(srv.ListenAndServe())
+		Log(LogInf, "HTTP server started, port: %s", *HttpPort)
+	}
 }
 
 func HttpError(err error, title string, w http.ResponseWriter) bool {
