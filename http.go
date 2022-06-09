@@ -25,6 +25,7 @@ HttpPort *string
 HttpsPort *string
 IsHttps *bool
 IsRedirect *bool
+RedirectDomain *string
 CertFile *string
 KeyFile *string
 )
@@ -32,6 +33,7 @@ KeyFile *string
 func AddFlagHttp() {
 	IsHttps = flag.Bool("https", true, "Use HTTPS")
 	IsRedirect = flag.Bool("redirect", true, "Use HTTP as redirection to HTTPS")
+	RedirectDomain = flag.String("domain", "", "Domain to redirect to")
 	HttpPort = flag.String("httpport", "80", "HTTP server port")
 	HttpsPort = flag.String("httpsport", "443", "HTTPS server port")
 	CertFile = flag.String("certfile", "", "CA certificate file")
@@ -653,7 +655,11 @@ func HttpServe() {
 		if *IsRedirect {
 			go func() {
 				PanicIfErr(http.ListenAndServe(":" + *HttpPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
-					http.Redirect(w, r, "https://" + r.Host + r.RequestURI, http.StatusMovedPermanently)
+					domain := *RedirectDomain
+					if domain == "" {
+						domain = r.Host
+					}
+					http.Redirect(w, r, "https://" + domain + r.RequestURI, http.StatusMovedPermanently)
 				})))
 			}()
 			Log(LogInf, "HTTP redirect server started, port: %s", *HttpPort)
