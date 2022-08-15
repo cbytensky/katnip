@@ -6,15 +6,16 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/bmatsuo/lmdb-go/lmdb"
-	"github.com/kaspanet/kaspad/app/appmessage"
-	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
-	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 	"math/bits"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/kaspanet/kaspad/app/appmessage"
+	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
+	"github.com/kaspanet/kaspad/infrastructure/network/rpcclient"
 )
 
 const KeyLength = 16 // length of part of hash that is used as DB keys (it is not necessary to use all of 32 bytes)
@@ -66,14 +67,15 @@ type (
 	}
 
 	Transaction struct {
-		Hash     Hash
-		Id       Hash
-		Version  uint16
-		LockTime uint64
-		Payload  Bytes
-		Mass     uint64
-		Inputs   []Input
-		Outputs  []Output
+		Hash      Hash
+		Id        Hash
+		Version   uint16
+		LockTime  uint64
+		Payload   Bytes
+		ExtraData string
+		Mass      uint64
+		Inputs    []Input
+		Outputs   []Output
 	}
 
 	Input struct {
@@ -312,6 +314,7 @@ func InsertingToDb() {
 			err := DbEnv.Update(func(txn *lmdb.Txn) (err error) {
 				for _, rpcBlock := range rpcBlocks {
 					rpcVData := rpcBlock.VerboseData
+
 					rpcHeader := rpcBlock.Header
 					blockHash := S2h(rpcVData.Hash)
 					blueWork := S2b(rpcHeader.BlueWork)
@@ -402,17 +405,22 @@ func InsertingToDb() {
 						if rpcTxVData == nil {
 							continue
 						}
+						var extraData []byte
+						if len(rpcTransaction.Payload) >= 120 {
+							extraData, _ = hex.DecodeString(rpcTransaction.Payload[120:])
+						}
 						rpcInputs := rpcTransaction.Inputs
 						rpcOutputs := rpcTransaction.Outputs
 						transaction := Transaction{
-							Hash:     S2h(rpcTxVData.Hash),
-							Id:       S2h(rpcTxVData.TransactionID),
-							Version:  rpcTransaction.Version,
-							LockTime: rpcTransaction.LockTime,
-							Payload:  S2b(rpcTransaction.Payload),
-							Mass:     rpcTxVData.Mass,
-							Inputs:   make([]Input, len(rpcInputs)),
-							Outputs:  make([]Output, len(rpcOutputs)),
+							Hash:      S2h(rpcTxVData.Hash),
+							Id:        S2h(rpcTxVData.TransactionID),
+							Version:   rpcTransaction.Version,
+							LockTime:  rpcTransaction.LockTime,
+							Payload:   S2b(rpcTransaction.Payload),
+							ExtraData: string(extraData),
+							Mass:      rpcTxVData.Mass,
+							Inputs:    make([]Input, len(rpcInputs)),
+							Outputs:   make([]Output, len(rpcOutputs)),
 						}
 						key := H2k(transaction.Id)
 
