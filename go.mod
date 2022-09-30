@@ -1,6 +1,6 @@
 module github.com/cbitensky/katnip
 
-go 1.15
+go 1.16
 
 replace github.com/kaspanet/kaspad => ../../kaspanet/kaspad
 

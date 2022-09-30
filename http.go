@@ -8,8 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/bmatsuo/lmdb-go/lmdb"
-	"github.com/kaspanet/kaspad/util/difficulty"
 	"github.com/kaspanet/kaspad/domain/consensus/utils/constants"
+	"github.com/kaspanet/kaspad/util/difficulty"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,13 +21,13 @@ import (
 )
 
 var (
-HttpPort *string
-HttpsPort *string
-IsHttps *bool
-IsRedirect *bool
-RedirectDomain *string
-CertFile *string
-KeyFile *string
+	HttpPort       *string
+	HttpsPort      *string
+	IsHttps        *bool
+	IsRedirect     *bool
+	RedirectDomain *string
+	CertFile       *string
+	KeyFile        *string
 )
 
 func AddFlagHttp() {
@@ -61,9 +61,9 @@ func HttpServe() {
 		var html string
 		dagInfo, err := RpcClient.GetBlockDAGInfo()
 		if err != nil {
-				html = "Not Found"
+			html = "Not Found"
 		} else {
-			html = fmt.Sprintf("%f", dagInfo.Difficulty * 2)
+			html = fmt.Sprintf("%f", dagInfo.Difficulty*2)
 		}
 		w.Write([]byte(html))
 	})
@@ -660,12 +660,12 @@ func HttpServe() {
 		Log(LogInf, "HTTPS server started, port: %s", *HttpsPort)
 		if *IsRedirect {
 			go func() {
-				PanicIfErr(http.ListenAndServe(":" + *HttpPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+				PanicIfErr(http.ListenAndServe(":"+*HttpPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					domain := *RedirectDomain
 					if domain == "" {
 						domain = r.Host
 					}
-					http.Redirect(w, r, "https://" + domain + r.RequestURI, http.StatusMovedPermanently)
+					http.Redirect(w, r, "https://"+domain+r.RequestURI, http.StatusMovedPermanently)
 				})))
 			}()
 			Log(LogInf, "HTTP redirect server started, port: %s", *HttpPort)
@@ -673,7 +673,7 @@ func HttpServe() {
 			go func() {
 				srv1 := http.Server{
 					WriteTimeout: 45 * time.Second,
-					Addr: ":" + *HttpPort,
+					Addr:         ":" + *HttpPort,
 				}
 				PanicIfErr(srv1.ListenAndServe())
 			}()
