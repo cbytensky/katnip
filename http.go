@@ -119,7 +119,7 @@ func HttpServe() {
 				"<tr><th>Circulating supply</th><td class=\"l\">" + FormatKaspa(uint64(blockDAGInfo.CirculatingSupply)) + "</td></tr>\n" +
 				"<tr><th>Block header count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.HeaderCount) + "</td></tr>\n" +
 				"<tr><th>Block count</th><td class=\"l\">" + FormatNumber(blockDAGInfo.BlockCount) + "</td></tr>\n" +
-				"<tr><th>Difficulty</th><td class=\"l\">" + fmt.Sprintf("%f", blockDAGInfo.Difficulty) + "</td></tr>\n" +
+				"<tr><th>Difficulty</th><td class=\"l\">" + FormatFloat(blockDAGInfo.Difficulty) + "</td></tr>\n" +
 				"<tr><th>Latest pruning point</th><td class=\"l m\"><a href=\"/block/" + pruningPoint + "\">" + pruningPoint + "</a></td></tr>\n" +
 				"<tr><th>Tip hashes (" + FormatNumber(len(blockDAGInfo.TipHashes)) + ")</th><td class=\"l m\"><div class=\"scroll\">"
 			for _, hash := range blockDAGInfo.TipHashes {

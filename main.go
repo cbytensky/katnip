@@ -613,7 +613,11 @@ func FormatTimestamp(timestamp uint64) string {
 }
 
 func FormatKaspa(sompi uint64) string {
-	result := fmt.Sprintf("%.8f", float64(sompi)/constants.SompiPerKaspa)
+	return FormatFloat(float64(sompi)/constants.SompiPerKaspa)
+}
+
+func FormatFloat(num float64) string {
+	result := fmt.Sprintf("%.8f", num)
 	point := strings.Index(result, ".")
 	result2 := result[point:]
 	i := point - 3
@@ -623,6 +627,7 @@ func FormatKaspa(sompi uint64) string {
 	result2 = result[:i+3] + result2
 	return result2
 }
+
 
 func FormatNumber(num interface{}) string {
 	return fmt.Sprintf("%d", num)
