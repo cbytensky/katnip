@@ -405,22 +405,17 @@ func InsertingToDb() {
 						if rpcTxVData == nil {
 							continue
 						}
-						var extraData []byte
-						if len(rpcTransaction.Payload) >= 120 {
-							extraData, _ = hex.DecodeString(rpcTransaction.Payload[120:])
-						}
 						rpcInputs := rpcTransaction.Inputs
 						rpcOutputs := rpcTransaction.Outputs
 						transaction := Transaction{
-							Hash:      S2h(rpcTxVData.Hash),
-							Id:        S2h(rpcTxVData.TransactionID),
-							Version:   rpcTransaction.Version,
-							LockTime:  rpcTransaction.LockTime,
-							Payload:   S2b(rpcTransaction.Payload),
-							ExtraData: string(extraData),
-							Mass:      rpcTxVData.Mass,
-							Inputs:    make([]Input, len(rpcInputs)),
-							Outputs:   make([]Output, len(rpcOutputs)),
+							Hash:     S2h(rpcTxVData.Hash),
+							Id:       S2h(rpcTxVData.TransactionID),
+							Version:  rpcTransaction.Version,
+							LockTime: rpcTransaction.LockTime,
+							Payload:  S2b(rpcTransaction.Payload),
+							Mass:     rpcTxVData.Mass,
+							Inputs:   make([]Input, len(rpcInputs)),
+							Outputs:  make([]Output, len(rpcOutputs)),
 						}
 						key := H2k(transaction.Id)
 
@@ -644,4 +639,13 @@ func PanicIfErr(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (tx *Transaction) PopulateExtraData() {
+	var extraData []byte
+	encodedPayload := []byte(hex.EncodeToString(tx.Payload))
+	if len(encodedPayload) >= 120 {
+		extraData, _ = hex.DecodeString(string(encodedPayload[120:]))
+	}
+	tx.ExtraData = string(extraData)
 }

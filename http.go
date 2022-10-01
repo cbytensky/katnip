@@ -467,6 +467,7 @@ func HttpServe() {
 			HttpError(errors.New("key not found: "+path[2]), "", w)
 			return
 		}
+		transaction.PopulateExtraData()
 
 		body := "<table>\n" +
 			"<tbody>\n"
