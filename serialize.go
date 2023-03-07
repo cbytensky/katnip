@@ -120,7 +120,7 @@ func serializeArray(isSer bool, buffer *bytes.Buffer, metaValue reflect.Value) {
 }
 
 func serializeUint64(buffer *bytes.Buffer, value uint64) {
-	valueBytes := make([]byte, 8)
+	valueBytes := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(valueBytes, value)
 	buffer.Write(valueBytes[:n])
 }
